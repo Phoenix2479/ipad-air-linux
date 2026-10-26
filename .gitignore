@@ -1,0 +1,10 @@
+/rootfs.img
+/source/
+/boot/*.macho
+/boot/*.dtb
+/boot/inputs/
+/evidence/*.log
+/evidence/dmesg.txt
+/logs/
+/.host-session.json
+**/__pycache__/

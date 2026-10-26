@@ -1,0 +1,1 @@
+chosen.bootargs=console=tty0 loglevel=7 rdinit=/init
