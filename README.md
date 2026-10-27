@@ -36,9 +36,9 @@ hold Top alone for 3 seconds, hold Top + Home for 8 seconds, then release Top
 while continuing to hold Home until DFU is detected. A successful DFU screen is
 black. The boot tool then sends the cached RAM boot images and starts the desktop.
 
-This wrapper's cold-boot command follows the successful Hoolock command used in
-the session. The packaged desktop start/stop commands have also been tested on
-the real iPad. Close `screen` or other serial clients before using them.
+The complete `run.sh` recovery, DFU, boot, and desktop sequence was verified on
+the real iPad on 27 October 2026. The packaged desktop start/stop commands have
+also been tested. Close `screen` or other serial clients before using them.
 
 ## Restart or stop only the desktop
 
