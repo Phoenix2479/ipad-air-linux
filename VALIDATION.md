@@ -94,3 +94,33 @@ with value 0, and another `SYN_REPORT`. The four-event reader completed and
 exited. This verifies the physical button press and release through GPIO and
 evdev. It does not validate the touchscreen. The decoded evidence is saved
 locally in `.omx/work/j72-touch/button-events.json`.
+
+## Touch prerequisites and experimental probe preparation
+
+- Read the live Apple device tree through a read-only MTD node backed by
+  bootloader-reserved RAM. The host and device hashes match.
+- Recovered 1,024 bytes of nonzero per-device calibration privately.
+- Verified the A7 clock-ID lookup and name table against iOS code. SPI2's
+  bootloader-reported input rate is 60 MHz; the touch PWM target is channel 2
+  at 32,768 Hz. Neither frequency has been measured electrically.
+- Verified the downloaded 16G77 OS image against its BuildManifest SHA-1 and
+  extracted the matching J72 constructed Z2 firmware resource. Header and
+  payload checksum checks passed.
+- The kernelcache inspector passes nine unit tests and parses the actual input
+  into 15 segments, 179 bundle identifiers and one J72 personality. Independent
+  review passed after correcting XML key references, scalar structure, identifier
+  types and section ownership.
+- Compiled the status-only module and experimental J72 DTB against
+  `7.0.12-j72baseline`. Module vermagic matches that release. The descriptor's
+  SPI2 resource and power-domain phandle match the intended nodes.
+- Kernel `checkpatch.pl` reports zero errors and zero warnings for the module.
+  Independent source review passes the explicitly limited experiment contract.
+- Reconstructed the original known-good m1n1 payload byte for byte before using
+  the same assembly recipe with the new baseline and inspection DTB. Original
+  boot artifacts remain unchanged.
+
+The experimental payload and receipt are under `source/build/j72-spi-status/`.
+The original desktop was stopped cleanly and the iPad returned to recovery.
+The boot process is waiting for manual DFU entry. The new kernel and one-shot
+SPI read have not yet been validated on hardware. A recoverable hang remains
+possible. No touch power, reset, PWM or SPI transfer has been attempted.

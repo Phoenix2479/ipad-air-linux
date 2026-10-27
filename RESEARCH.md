@@ -120,3 +120,43 @@ clock framework, and no PWM device registered. The firmware tree identifies
 SPI2 gate 76 and clock ID 308. The iOS SPI start code requests its provider's
 `nclk` rate. No SPI or PWM power change was made during this inspection. The
 live summaries are saved locally in `.omx/work/j72-spi/live-dependencies.log`.
+
+## Live metadata and matching firmware recovered
+
+m1n1 preserves its live Apple device tree in a `phram` reserved-memory region.
+The matching original-kernel `mtd` and `phram` modules exposed that region through
+`/dev/mtd1ro`. Its 114,688-byte read matched the device-side SHA-256. The modules
+could not be unloaded because the original kernel disables module unloading;
+they remain only until that Linux boot ends. No flash or internal-storage read
+was involved.
+
+The live tree contains 1,024 nonzero bytes of J72 touch calibration. The private
+copy is `source/research/j72-touch-calibration.bin`; its contents are not tracked
+or published. The clock-frequency table has a 60 MHz entry at index 52. The A7
+iOS IO driver subtracts `0x100` from clock IDs and labels that entry `nclk`, so
+SPI2 clock ID 308 maps to the bootloader-reported 60 MHz rate. This is not a
+physical frequency measurement. The touch PWM function targets `grape-clk`,
+channel 2, with `default-hz = 32768`. It must not inherit the A10 touch clock setup.
+
+The iOS class metadata confirms that `AppleMultitouchN1SPI` inherits from
+`AppleMultitouchZ2SPI`. The matching Apple 16G77 OS image's
+`usr/share/firmware/multitouch/J72.mtprops` supplies profile `C1F15,1` and declares
+`PreconstructedBootloadPacketType = Z2`. It contains 57,016 bytes of constructed
+firmware, version `0x0210.bin`, with a 57,000-byte payload. The OS image matches
+the BuildManifest SHA-1; the packet header and payload checksums also pass.
+These assets have been recovered and verified, not uploaded to the controller.
+
+`tools/inspect-j72-kernel.py` makes the kernelcache profile inspection repeatable.
+It parses the monolithic Mach-O section table and prelink XML references, emits
+metadata, and does not execute or extract code. Nine tests and an actual
+kernelcache parse pass. Independent review found no remaining actionable parser
+defect after four fixes.
+
+The first new hardware experiment is documented in [probe/README.md](probe/README.md).
+An automatic platform-driver approach was rejected because domain attachment
+can power hardware before its probe callback and can retry deferred probing.
+The replacement is an explicitly loaded, one-shot module with all descriptor
+checks before direct genpd attachment and one STATUS read. It compiles against
+the baseline kernel, passes kernel style checks, and has an independent review
+pass for that bounded experiment. Hardware access remains unvalidated until the
+fresh boot and observation. No touchscreen activation follows automatically.
