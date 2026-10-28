@@ -70,7 +70,10 @@ image header, matching DTB, initramfs `/init`, and matching evdev module passed
 inspection. The local export is `source/build/j72-baseline-20261027/`.
 The compiler emitted one warning about upstream Btrfs `discard_state`.
 Independent review could not run with the account's configured reviewer model.
-The new image has not been booted.
+On 28 October this kernel booted on the physical J72 with the separate SPI
+inspection DTB. USB serial verified its model and `7.0.12-j72baseline` release.
+This establishes a bootable diagnostic baseline. It does not validate desktop
+replay on this build or a working touchscreen. See [VALIDATION.md](VALIDATION.md).
 
 ## Gate the first controller experiment
 

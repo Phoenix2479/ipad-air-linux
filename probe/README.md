@@ -14,9 +14,9 @@ result. Keep the original boot payload available for recovery.
 
 ## Build with the matching baseline
 
-Build the kernel in [BUILD-J72.md](../BUILD-J72.md) first. Copy the module's C
-file and Makefile into a directory on the builder's Linux filesystem, then use
-that directory as `M`:
+Build the kernel in [BUILD-J72.md](../BUILD-J72.md) first. Copy
+the `j72_spi_*.c` module files and `Makefile` into a directory on the builder's
+Linux filesystem, then use that directory as `M`:
 
 ```sh
 make -C /home/arundinakar.guest/j72-linux-tar \
@@ -37,12 +37,32 @@ The descriptor includes the original J72 tree and adds one unbound inspection
 node. The module and descriptor must be inspected together. The original
 `run.sh` uses the original payload and does not run this experiment.
 
+Compile `load-once.c` on the same aarch64 Linux builder:
+
+```sh
+cc -static -Os -Wall -Wextra -Werror \
+  /Users/arundinakar/iPad-Air-Linux/probe/load-once.c \
+  -o /home/arundinakar.guest/j72-load-once
+```
+
+Upload the loader and module to iPad RAM and verify both device-side SHA-256
+hashes against the host files. Load the module with:
+
+```sh
+/tmp/j72-load-once /tmp/j72_spi_status.ko
+```
+
+The loader makes one `finit_module` syscall with no parameters or force flags.
+It exits on failure without a retry. BusyBox 1.37.0 `insmod` can invoke module
+initialization again after a failed first load. Use the single-call loader for
+this experiment.
+
 ## Interpret the result
 
 After a fresh experimental boot, verify the model and exact kernel release
 through USB serial before uploading and loading the checksum-verified module
 from RAM. The kernel log reports `j72_spi_status: STATUS=...`, followed by a
-separate cleanup result. A successful `insmod` alone is insufficient evidence.
+separate cleanup result. A successful loader exit alone is insufficient evidence.
 Inspect the genpd summary after cleanup. Report its observed state without
 claiming that bookkeeping guarantees physical power-off.
 
@@ -51,6 +71,19 @@ The baseline disables module unloading, so a successful insertion cannot be
 repeated by unloading and reloading it. Reboot for another test. There is no
 automatic next operation after the snapshot.
 
-Compilation, exact release matching, descriptor checks, kernel style checks,
-and independent source review passed on 27 October. Hardware execution is
-pending. Touch remains unimplemented.
+On 28 October the experimental kernel booted on the J72. The first module
+refused its preflight because it compared a node's stored name with an absolute
+path. The corrected helper resolves the exact path, compares node identity and
+releases the lookup reference. Host regression tests, compilation, kernel style
+checks and independent source review passed.
+
+One corrected load through `load-once` returned zero and reported
+`STATUS=0x00000000 INCONCLUSIVE`, followed by `cleanup=0 detached=1`. The serial
+shell remained responsive. The inspection node stayed unbound and genpd reported
+SPI2 `off-0` afterward. This does not prove controller communication, physical
+power-off or touchscreen operation. See [VALIDATION.md](../VALIDATION.md) for the
+recorded limits. Touch remains unimplemented.
+
+The separately reviewed [divider experiment](DIVIDER.md) records the next
+controller test. The [clock-control experiment](ENABLE.md) records the later
+enable/disable readback. Building the modules does not load them automatically.

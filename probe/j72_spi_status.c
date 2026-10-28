@@ -16,14 +16,17 @@
 
 static bool power_node(struct device_node *np, const char *path, u32 offset)
 {
+	struct device_node *expected = of_find_node_by_path(path);
 	u32 reg[2];
+	bool valid;
 
-	return of_device_is_available(np) && of_node_full_name(np) &&
-		!strcmp(of_node_full_name(np), path) &&
+	valid = expected && expected == np && of_device_is_available(np) &&
 		of_device_is_compatible(np, "apple,s5l8960x-pmgr-pwrstate") &&
 		of_property_count_u32_elems(np, "reg") == 2 &&
 		!of_property_read_u32_array(np, "reg", reg, 2) &&
 		reg[0] == offset && reg[1] == 4;
+	of_node_put(expected);
+	return valid;
 }
 
 static int __init j72_spi_status_init(void)

@@ -158,5 +158,76 @@ can power hardware before its probe callback and can retry deferred probing.
 The replacement is an explicitly loaded, one-shot module with all descriptor
 checks before direct genpd attachment and one STATUS read. It compiles against
 the baseline kernel, passes kernel style checks, and has an independent review
-pass for that bounded experiment. Hardware access remains unvalidated until the
-fresh boot and observation. No touchscreen activation follows automatically.
+pass for that bounded experiment. The 28 October observation below records its
+first hardware result. No touchscreen activation follows automatically.
+
+## 28 October controller gate and Cascadia comparison
+
+The diagnostic `7.0.12-j72baseline` kernel booted on the physical J72. The first
+module refused an incorrect node-name comparison before power-domain attachment.
+After correcting that check and replacing BusyBox's retrying module-load path
+with a single `finit_module` call, the probe completed one status read. It logged
+`STATUS=0x00000000 INCONCLUSIVE` and `cleanup=0 detached=1`. Linux remained
+responsive. This does not establish working controller transfers. Full evidence
+and limits are in [VALIDATION.md](VALIDATION.md).
+
+Cascadia's A5 P105 digitizer also uses `AppleMultitouchN1SPI`. Its recorded live
+FLL value and nine other scalar fields match our parsed J72 personality,
+including the firmware and calibration addresses, clock-enable address and
+reset delay. The [P105 boot record](https://github.com/rzxvx/Project-Cascadia/blob/e8f3e045a5e38bde5a5a79e1cc72ae22020d63ac/docs/research/p105-z2-boot.md)
+documents firmware and calibration upload, N1 calibration and post-boot scan
+commands. It also records a missing power rail that prevented scanning after a
+successful upload.
+
+P105 uses profile `C1F14,1`; J72 uses `C1F15,1`. The shared class and metadata
+justify comparing the protocol implementations. They do not validate P105's
+GPIOs, PMU bits, controller settings or scan commands on J72. The next step is
+to verify the A7 controller and N1 defaults against matching iOS code before
+configuring the controller or sending touch firmware.
+
+### A7 register bank responds
+
+The matching iOS driver reads the `spi-version` property and selects version-1
+FIFO fields with 16 entries. It requests the `nclk` value and caches it at object
+offset `0x168`. Its calculation at `0xfffffff007d66a00` uses the ceiling of
+`nclk * period_ns / 1,000,000,000`. Its programming routine writes DIV `0x30`
+before IDLE `0x38`, STATUS `0x08`, CFG `0x04` and CLKCFG `0x00`.
+
+The first disabled-controller probe observed CLKCFG `0`, CFG `8`, STATUS `0`
+and DIV `1` and refused its all-zero acceptance check without a DIV write.
+A separately reviewed revision required those exact observed values. It wrote
+DIV `120`, read back `120`, restored `1` and read back `1`. Operation and cleanup
+returned zero. The shell remained responsive. This is evidence that the divider
+register responds. It does not validate output frequency or SPI transfers.
+The bounded implementation and procedure are in [probe/DIVIDER.md](probe/DIVIDER.md).
+
+### PWM function spelling and remaining work
+
+The raw J72 clock-enable function word is `43 6d 77 70`, numerically
+`0x70776d43` when read little-endian. The ADT parser formats that token as
+`pwmC`; Cascadia's notes show the same raw bytes as `Cmwp`. The spelling
+difference does not establish a different function.
+
+The A7 `AppleARMPWM` dispatch compares that numeric token. Its
+`AppleS5L8920XPWM` channel method writes three offsets for channel 2,
+`0x10`, `0x14` and `0x20`. Caller argument meanings, frequency conversion and
+board-level sequencing still need verification. No PWM operation was performed.
+
+### Clock-control readback differs from the written command
+
+The bounded enable probe required initial CLKCFG `0`, CFG `8`, STATUS `0` and
+DIV `1`. It proved DIV `120`, wrote the A7 driver's CLKCFG command `0xd`, read
+back `1`, wrote stop `0`, read `0`, restored DIV `1` and read `1`. Its strict
+full-word comparison returned `-EIO`; cleanup and restoration passed. The iPad
+remained responsive and no retry followed.
+
+The newer [Linux Apple SPI driver](https://github.com/HoolockLinux/linux/blob/dfa4d42081312dd34ec33ee8d23174309f683188/drivers/spi/spi-apple.c)
+defines CTRL RUN as bit 0, TX reset as bit 2 and RX reset as bit 3. These
+definitions suggest that the missing `0xc` may be command bits rather than an
+enable failure. This is an inference for the A7, not a verified register
+contract. The newer binding does not establish A7 support. No transfer or FIFO
+data write occurred, but the CTRL command may have reset internal FIFOs.
+
+The next source investigation must resolve those A7 control-bit semantics and
+readback expectations before modifying the test or starting communication.
+The implementation and recorded limits are in [probe/ENABLE.md](probe/ENABLE.md).

@@ -70,7 +70,8 @@ artifacts have not been published.
   configured `gpt-5.5` reviewer model is unsupported by this account.
 
 Artifacts and `validation.json` are saved locally in
-`source/build/j72-baseline-20261027/`. The new kernel has not been booted.
+`source/build/j72-baseline-20261027/`. The new kernel was unbooted at the end of
+27 October. The 28 October results below record its first hardware boot.
 Neither the static A7 firmware inspection nor this compilation validates a live
 SPI or touch driver. See [BUILD-J72.md](BUILD-J72.md) for the recipe and probe gate.
 
@@ -121,6 +122,127 @@ locally in `.omx/work/j72-touch/button-events.json`.
 
 The experimental payload and receipt are under `source/build/j72-spi-status/`.
 The original desktop was stopped cleanly and the iPad returned to recovery.
-The boot process is waiting for manual DFU entry. The new kernel and one-shot
-SPI read have not yet been validated on hardware. A recoverable hang remains
-possible. No touch power, reset, PWM or SPI transfer has been attempted.
+At the end of 27 October the boot process was waiting for manual DFU entry.
+No touch power, reset, PWM or SPI transfer had been attempted.
+
+## 28 October diagnostic boot and SPI status
+
+- The user ran the experimental boot command and entered physical DFU. The Mac
+  completed gaster's four stages and sent the cached iBoot chain and payload.
+- USB serial verified `Apple iPad Air (Cellular)`, `apple,j72` and
+  `7.0.12-j72baseline`. Initial kernel taint was zero. The captured boot log had
+  no panic, oops or unhandled exception. Existing PMIC cell-count warnings and
+  the failed legacy `g_multi` configuration remain in the log; the configured
+  ACM and NCM gadget subsequently started.
+- The initial module passed its device-side hash check but returned `-EINVAL`.
+  The helper compared `of_node_full_name()` with an absolute path. In this
+  kernel, flattened nodes store a basename in that member. It therefore refused
+  before platform-device lookup, resource reservation or domain attachment.
+- One BusyBox `insmod` command invoked the failed initialization twice through
+  its `finit_module` and `init_module` fallback. Neither reached the status read.
+  The failed external module load set the expected out-of-tree taint, `4096`.
+- The corrected helper resolves the exact absolute path and compares node
+  identity, with balanced lookup references. Five host test groups cover 23
+  fixtures, including valid basenames, wrong identities and malformed metadata.
+  All 14 repository tests passed. The rebuilt module matches the original
+  baseline module's vermagic and passes checkpatch with zero errors or warnings.
+- A static aarch64 loader makes one `finit_module` syscall without fallback.
+  Seven stubbed cases covered success, four syscall errors and refusals before
+  the syscall for a missing argument or file. Independent source
+  review found no blocker for the corrected bounded experiment on the still-live
+  kernel, subject to fresh identity, taint and idle-state checks.
+- Both corrected artifacts passed device-side SHA-256 checks. One loader call
+  returned zero and logged `STATUS=0x00000000 INCONCLUSIVE` and
+  `cleanup=0 detached=1`. The serial shell remained responsive. Taint stayed
+  `4096`, the inspection node was unbound and genpd reported SPI2 and PWM0
+  `off-0`, with SIO_P `on`.
+
+The result establishes a bootable diagnostic kernel and completion of one
+bounded status-read operation. Zero status does not prove a responding SPI
+controller or valid transfers. Reported domain state and detach bookkeeping do
+not prove physical power-off. No SPI controller configuration, touch-rail write,
+reset, PWM setup, transfer or touch firmware upload occurred.
+
+Corrected module, loader and hashes are in
+`source/build/j72-spi-status-fix-20261028/`. Captures, regression evidence,
+build logs and independent review are in `.omx/work/j72-touch-20261028/`.
+The iPad remains in the diagnostic Linux shell. Desktop replay on this kernel
+and native touch remain unverified. The next gate is an A7-specific comparison
+of controller status, clocks and power behavior with matching iOS code.
+
+## 28 October disabled-controller divider readback
+
+The matching A7 driver selects SPI version 1, requests `nclk`, calculates a
+divider from the requested period and writes the divider before CFG and CLKCFG.
+The live ADT reports SPI version 1 and a 60 MHz input. This is source and
+bootloader metadata evidence, not a measured physical rate.
+
+An isolated module retained the reviewed status probe's preflight and PM
+lifetime. The initial version required all four initial registers to be zero.
+Its first run observed CLKCFG `0`, CFG `8`, STATUS `0` and DIV `1`. It refused
+with `-EBUSY` before any DIV write, reported successful cleanup and left no
+divider module, driver binding or PM attachment.
+
+The A7 source permits divider `1` for version 1 and includes bit 3 in its CFG
+construction. A separate architecture review accepted a revision restricted
+to exactly the observed four values. The source, tests and rebuilt binary then
+passed independent code review. All 29 repository tests passed, including
+unexpected-state refusals, access ordering, readback mismatches and cleanup
+failures. Checkpatch reported zero errors and zero warnings. Both source
+snapshots and build receipts remain separate.
+
+After fresh device checks and device-side module and loader SHA-256 checks,
+one single-syscall load completed. Its log records DIV readback `120` followed
+by restored readback `1`, `operation=0` and `cleanup=0 detached=1`. The shell
+remained responsive. Taint stayed `4096`, the inspection node was unbound and
+runtime status was `unsupported`. Genpd reported SPI2 and PWM0 `off-0`, with
+SIO_P `on`. The successful status and divider modules remain loaded in RAM.
+
+The test made exactly two SPI register writes, both to DIV `0x30`. It made no
+controller-enable, CFG, STATUS, PIN, count or FIFO write, GPIO/reset operation,
+PWM change, touch-rail change, firmware upload or transfer. Register readback
+and restoration do not prove physical clock rate, power-off or touch support.
+
+Revised artifacts are in `source/build/j72-spi-divider-r2-20261028/`. Source
+evidence, review reports, both hardware captures and structured results are in
+`.omx/work/j72-spi-next-20261028/`. The next gate is an A7-specific controller
+enable and transfer design with separate board-level power/reset/clock evidence
+before slave communication.
+
+## 28 October clock-control enable and disable observation
+
+The matching A7 driver caches CLKCFG `0xd` for normal programming and writes
+zero during setup and before provider shutdown. Its normal transfer setup also
+programs IDLE, STATUS and CFG. A separately reviewed isolated test preserved the
+observed CFG `8` and made no transfer request or configuration write.
+
+The new `j72_spi_enable` module copied the measured probe's validation and PM
+lifetime. It required the exact initial `0/8/0/1` state, proved DIV `120` before
+an enable write, attempted CLKCFG stop after every returning enable read and
+restored DIV `1` only after stop readback was zero. All 44 repository tests
+passed, including refusals, access order, enable/disable mismatches, incomplete
+restoration and PM cleanup errors. The matching module passed checkpatch with
+zero errors or warnings. Independent design and source/build review passed the
+bounded experiment. Measured status and divider sources remained unchanged.
+
+After fresh identity, taint, ownership and device-side SHA-256 checks, one load
+observed DIV `120`, enabled CLKCFG `1`, disabled CLKCFG `0` and restored DIV `1`.
+The strict expected enabled word was `0xd`, so the module returned `-EIO` and
+the single-call loader exited `1`. Cleanup reported zero and detachment. Linux
+stayed responsive with taint `4096`. The node was unbound, runtime status was
+`unsupported`, SPI2/PWM0 were reported `off-0` and SIO_P was `on`. The failed
+enable module was not retained. No retry followed the mismatch.
+
+This records a changed control readback and successful stop/divider restoration,
+not a passing full-word enable check. No physical clock or pins were measured.
+The newer Linux Apple SPI driver labels bits `0x4` and `0x8` as FIFO-reset
+controls and `0x1` as RUN. That suggests an interpretation of the A7 readback,
+but the A7 bit semantics still need verification. No FIFO data register, CFG,
+STATUS, PIN or count was written, and no touch GPIO/reset, PWM, rail or firmware
+operation occurred. The CTRL command itself may include FIFO-reset effects.
+
+Artifacts are in `source/build/j72-spi-enable-20261028/`. Captures, structured
+result, A7 instruction evidence, newer-driver reference and review reports are
+in `.omx/work/j72-spi-enable-20261028/`. See [probe/ENABLE.md](probe/ENABLE.md).
+The next gate is interpretation of the A7 control bits before any revised
+acceptance check or further hardware action.
