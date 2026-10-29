@@ -436,3 +436,48 @@ clock was 55,384,615 Hz, derived from PLL state instead of a bootloader value.
 J72's 60 MHz `nclk` therefore still needs a register-level check before
 transfers. J172 required SmartIO DMA for its firmware upload. The iPad 5 S8000
 driver uses bounded PIO only, so a first A7 port may not need DMA.
+
+### A7 N1 boot protocol matches the iPad 5 driver
+
+A read-only comparison of the 16G77 kernelcache with `apple_n1.c` found the
+same N1 boot protocol. Scripts and packet checks are in
+`.omx/work/j72-n1-protocol-20261029/`. Spot checks here confirmed one
+`0xc119` constant site at `0xfffffff007e9ae10`. They also confirmed the
+firmware validation and the calibration hash.
+
+The shared Z2SPI code follows the same power-on order as `apple_n1`:
+
+1. `power_ana`, then `power_ldo`.
+2. Wait 5 ms, assert `enable_cs`, and start the `pwmC` clock.
+3. Wait 15 ms, send the wake word `19 c1`, and wait 10 ms.
+4. Select display-sync mode 3.
+5. Send the HBPP NOP, release reset, and wait the personality's 15 ms.
+
+Uploads follow the same order and framing. The J72 firmware packet (57,016
+bytes, sha256 `98f73566...998d`) is identical to the J71t packet. The
+calibration length field counts 4-byte words. Register calibration, read,
+write and execute commands use the same values in the same order. SPI uses
+mode 0 with CFG base `0x4018`. iOS sets an 83 ns period, which gives divider
+5 and about 12 MHz from the reported 60 MHz `nclk`. The iPad 5 runs at about
+10.26 MHz.
+
+J72 differs in four ways:
+
+- iOS sends the 128-byte, all-zero `prox-calibration` to `0x10009600` before
+  `MtCl`. `apple_n1` never sends it.
+- iOS drives `enable_cs` on GPIO 79, which is also SPI2's chip select.
+- iOS keeps the device off for at least 200 ms between power cycles.
+- The code default reset delay is 2 ms. The J72 personality sets 15 ms, as
+  `apple_n1` does.
+
+Porting `apple_n1` also needs these J72 pieces:
+
+- An optional LDO regulator in place of the J71t LDO GPIO.
+- A `pwmC` clock provider, using the PWM values above.
+- An A7 pin state for display sync on GPIO 119.
+- Chip-select idle handling on GPIO 79.
+- An optional prox-calibration upload.
+- Confirmation that J72 has the same D9 panel geometry.
+
+The A7 GPIO flag decoding for reset (GPIO 15) and the touch IRQ (GPIO 111)
+also remains open.
