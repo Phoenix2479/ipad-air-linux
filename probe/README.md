@@ -104,3 +104,4 @@ The separately reviewed [divider experiment](DIVIDER.md) records the next
 controller test. The [clock-control experiment](ENABLE.md) records the later
 enable/disable readback. Building the modules does not load them automatically.
 The [PMU read experiment](PMU.md) reads the D2089 touch rail registers without any write.
+The [SPI controller driver](SPI-CTRL.md) binds a PIO-only Samsung SPI v1 driver to the inspection node and leaves SPI2 idle.
