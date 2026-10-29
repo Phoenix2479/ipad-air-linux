@@ -129,6 +129,12 @@ What this shows:
   channel registers keep their contents while ps_pwm0 is off. The all-zero
   block in the earlier runs was the state iBoot leaves.
 
+After run 1 the source gained a `J72_TOUCH_ID_LIB` guard and an `N1_BUFFER`
+size so Stage C2 can include it. Transfers with a NULL phase are not logged,
+logged transfers show at most 32 bytes, and an oversized transfer is
+refused. The C1 sequence is unchanged. The run 1 module (`a5a0932b...`)
+predates these changes.
+
 ## Build and test
 
 Copy `j72_touch_power.c`, `j72_touch_id.c` and the Makefile to the builder

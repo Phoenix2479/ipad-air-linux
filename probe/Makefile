@@ -6,3 +6,4 @@ obj-m += j72_spi_ctrl.o
 obj-m += j72_touch_snap.o
 obj-m += j72_touch_power.o
 obj-m += j72_touch_id.o
+obj-m += j72_touch_fw.o

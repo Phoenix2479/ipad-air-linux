@@ -17,6 +17,9 @@
 /* iOS programs an 83 ns period: divider 5 from the reported 60 MHz input. */
 #define N1_SPEED_HZ 12000000
 #define N1_PACKET 16
+#ifndef N1_BUFFER
+#define N1_BUFFER N1_PACKET
+#endif
 #define N1_VERSION 0x10008ffc
 
 struct touch_id {
@@ -61,11 +64,19 @@ static int n1_xfer(struct touch_id *id, const char *phase, size_t len)
 	};
 	int ret;
 
+	if (!len || len > N1_BUFFER)
+		return -EMSGSIZE;
 	memset(id->rx, 0, len);
 	ret = spi_sync_transfer(id->spi, &transfer, 1);
-	pr_info(KBUILD_MODNAME ": %s tx=%*ph rx=%*ph ret=%d hz=%u\n", phase,
-		(int)len, id->tx, (int)len, id->rx, ret,
-		transfer.effective_speed_hz);
+	/* A NULL phase carries firmware or calibration: never log its bytes. */
+	if (phase)
+		pr_info(KBUILD_MODNAME ": %s tx=%*ph rx=%*ph ret=%d hz=%u\n", phase,
+			(int)min_t(size_t, len, 32), id->tx,
+			(int)min_t(size_t, len, 32), id->rx, ret,
+			transfer.effective_speed_hz);
+	else if (ret)
+		pr_err(KBUILD_MODNAME ": %zu-byte upload transfer failed: %d\n",
+		       len, ret);
 	return ret;
 }
 
@@ -86,8 +97,8 @@ static int find_controller(struct touch_id *id)
 	    id->ctlr->num_chipselect != 1 || id->ctlr->cs_gpiods ||
 	    !id->ctlr->use_gpio_descriptors)
 		return -EINVAL;
-	id->tx = kzalloc(N1_PACKET, GFP_KERNEL);
-	id->rx = kzalloc(N1_PACKET, GFP_KERNEL);
+	id->tx = kzalloc(N1_BUFFER, GFP_KERNEL);
+	id->rx = kzalloc(N1_BUFFER, GFP_KERNEL);
 	if (!id->tx || !id->rx)
 		return -ENOMEM;
 	return 0;
@@ -232,6 +243,7 @@ static void put_id(struct touch_id *id)
 	of_node_put(id->spi_np);
 }
 
+#ifndef J72_TOUCH_ID_LIB
 static int __init j72_touch_id_init(void)
 {
 	struct touch_power tp = {};
@@ -316,3 +328,4 @@ module_init(j72_touch_id_init);
 module_exit(j72_touch_id_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("One-shot J72 touch Stage C1 N1 bootloader identity read");
+#endif

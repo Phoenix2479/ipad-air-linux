@@ -40,7 +40,7 @@ class SerialShell:
     def close(self):
         os.close(self.fd)
 
-    def run(self, command, timeout=30):
+    def run(self, command, timeout=30, log=True):
         marker = '__J72_' + uuid.uuid4().hex + '__'
         text = command + "\nprintf '\\n" + marker + ":%s\\n' \"$?\"\n"
         outgoing = text.encode()
@@ -55,8 +55,8 @@ class SerialShell:
             if match:
                 self.pending = data[match.end():]
                 output = data[:match.start()].decode(errors='replace')
-                with (LOGS / 'serial.log').open('a') as log:
-                    log.write(output + '\n')
+                with (LOGS / 'serial.log').open('a') as out:
+                    out.write((output if log else '[upload chunk not logged]') + '\n')
                 if int(match.group(1)):
                     raise RuntimeError(output[-4000:])
                 return output
@@ -66,8 +66,8 @@ class SerialShell:
                 if not chunk:
                     raise RuntimeError('USB serial device disconnected')
                 data += chunk
-        with (LOGS / 'serial.log').open('ab') as log:
-            log.write(data)
+        with (LOGS / 'serial.log').open('ab') as out:
+            out.write(data if log else b'[upload chunk not logged]\n')
         raise TimeoutError('Timed out waiting for the iPad shell; see logs/serial.log')
 
     def upload_runtime(self):

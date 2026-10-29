@@ -225,16 +225,36 @@ def touch_id_problems(out, fields):
     return problems
 
 
+TOUCH_FW_COMMAND = TOUCH_ID_COMMAND.replace('j72_touch_id', 'j72_touch_fw')
+TOUCH_FW_EVIDENCE = TOUCH_ID_EVIDENCE.replace('j72_touch_id', 'j72_touch_fw')
+
+
+def touch_fw_problems(out, fields):
+    return [p.replace('j72_touch_id', 'j72_touch_fw') for p in touch_id_problems(out, fields)]
+
+
+# Private files go to the device's RAM filesystem only, never into the log.
+FIRMWARE_DIR = PROJECT / 'source/build/j72-touch-firmware-20261029'
+FIRMWARE = {
+    'j72_touch_fw': (
+        (FIRMWARE_DIR / 'apple/j72-n1.bin', '/lib/firmware/apple/j72-n1.bin'),
+        (FIRMWARE_DIR / 'apple/j72-n1-cal.bin', '/lib/firmware/apple/j72-n1-cal.bin'),
+    ),
+}
+
+
 MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
     'j72_touch_snap': (TOUCH_SNAP_COMMAND, touch_snap_problems),
     'j72_touch_power': (TOUCH_POWER_COMMAND, touch_power_problems),
     'j72_touch_id': (TOUCH_ID_COMMAND, touch_id_problems),
+    'j72_touch_fw': (TOUCH_FW_COMMAND, touch_fw_problems),
 }
 
 EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE,
-            'j72_touch_power': TOUCH_POWER_EVIDENCE, 'j72_touch_id': TOUCH_ID_EVIDENCE}
+            'j72_touch_power': TOUCH_POWER_EVIDENCE, 'j72_touch_id': TOUCH_ID_EVIDENCE,
+            'j72_touch_fw': TOUCH_FW_EVIDENCE}
 
 
 def check(shell, name):
@@ -261,7 +281,7 @@ def check(shell, name):
     return out, problems + module_problems(out, fields)
 
 
-def upload(shell, local, remote):
+def upload(shell, local, remote, mode='0755'):
     expected = sha256(local)
     if device_sha(shell, remote) == expected:
         return expected
@@ -270,9 +290,10 @@ def upload(shell, local, remote):
     for start in range(0, len(encoded), CHUNK):
         part = encoded[start:start + CHUNK]
         lines = '\n'.join(part[i:i + 512] for i in range(0, len(part), 512))
-        shell.run(f"cat >> {remote}.b64 <<'J72_PART'\n{lines}\nJ72_PART", timeout=60)
+        shell.run(f"cat >> {remote}.b64 <<'J72_PART'\n{lines}\nJ72_PART", timeout=60,
+                  log=False)
     shell.run(f'busybox base64 -d {remote}.b64 > {remote} && rm {remote}.b64 '
-              f'&& chmod 0755 {remote}')
+              f'&& chmod {mode} {remote}')
     actual = device_sha(shell, remote)
     if actual != expected:
         raise RuntimeError(f'{remote} hash mismatch: device {actual}, host {expected}')
@@ -303,6 +324,9 @@ def main():
             log.write('REFUSED ' + '; '.join(problems) + '\n')
             sys.exit('refused: ' + '; '.join(problems))
         log.write('LOADER ' + upload(shell, LOADER, '/tmp/j72-load-once') + '\n')
+        for local, remote in FIRMWARE.get(name, ()):
+            shell.run(f'busybox mkdir -p {remote.rsplit("/", 1)[0]}')
+            log.write(f'FILE {remote} ' + upload(shell, local, remote, '0600') + '\n')
         log.write('MODULE ' + upload(shell, args.module, f'/tmp/{name}.ko') + '\n')
         if not args.load:
             print('checks and uploads passed; rerun with --load for the single call')

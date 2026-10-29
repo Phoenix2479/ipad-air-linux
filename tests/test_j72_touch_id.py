@@ -31,6 +31,7 @@ SPI_STUBS = r'''
 typedef uint8_t u8;
 typedef uint16_t u16;
 #define SPI_MODE_0 0
+#define min_t(type, a, b) ((type)(a) < (type)(b) ? (type)(a) : (type)(b))
 #define GFP_KERNEL 0
 
 struct spi_controller {
