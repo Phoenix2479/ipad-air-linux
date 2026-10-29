@@ -30,6 +30,8 @@ TOUCH_POWER = ('PWM0_GENPD=pwm0                            off-0                
                'PWM_IOMEM=0\nPOWER_DEV=no\nSPI_DEVICES=\n'
                'PINMUX_UNCLAIMED=4\nGPIO_LINES=0\n' + PMU)
 
+TOUCH_ID = (TOUCH_POWER + 'SPI_DRIVER=j72-spi-ctrl\nSPI_MASTERS=spi0\n'
+            'SPI2_GENPD=spi2                            on                              0\n')
 
 class FakeShell:
     def __init__(self, transcript):
@@ -204,6 +206,43 @@ class ProbeOnceCheckTests(unittest.TestCase):
                        'j72_touch_power', 'pmgr', 'oops', 'SError'):
             self.assertIn(needle, evidence)
         self.assertNotIn('basename', evidence)
+
+    def test_clean_touch_id_transcript_passes(self):
+        problems, commands = check('j72_touch_id', GENERIC + TOUCH_ID)
+        self.assertEqual(problems, [])
+        command = commands[0]
+        self.assertIn('test -e /sys/module/j72_touch_id', command)
+        self.assertIn('test -e /sys/bus/platform/devices/j72_touch_id', command)
+        self.assertNotIn('j72_touch_power', command)
+
+    def test_touch_id_refuses_each_unsafe_state(self):
+        for old, new, problem in (
+                ('SPI_DRIVER=j72-spi-ctrl', 'SPI_DRIVER=',
+                 '20a088000.spi-status is not bound to j72-spi-ctrl'),
+                ('SPI_MASTERS=spi0', 'SPI_MASTERS=',
+                 'expected exactly one SPI controller, spi0'),
+                ('SPI_MASTERS=spi0', 'SPI_MASTERS=spi0 spi1',
+                 'expected exactly one SPI controller, spi0'),
+                ('spi2                            on', 'spi2                            off-0',
+                 'genpd summary does not show spi2 on'),
+                ('SPI_DEVICES=\n', 'SPI_DEVICES=spi0.0\n',
+                 'an SPI device already exists'),
+                ('POWER_DEV=no', 'POWER_DEV=yes',
+                 'platform device j72_touch_id already exists'),
+                ('PINMUX_UNCLAIMED=4', 'PINMUX_UNCLAIMED=3',
+                 'pins 15/79/111/119 are not all unclaimed')):
+            with self.subTest(new=new):
+                problems, _ = check('j72_touch_id', GENERIC + TOUCH_ID.replace(old, new))
+                self.assertEqual(problems, [problem])
+
+    def test_touch_id_evidence_covers_spi_and_the_stage_b_state(self):
+        evidence = probe_once.EVIDENCE['j72_touch_id']
+        for needle in ('pm_genpd_summary', "grep -i '20a1' /proc/iomem",
+                       'pinmux-pins', '/proc/sys/kernel/tainted',
+                       'j72_touch_id|spi0', 'oops', 'SError',
+                       'EV_SPI_DEVICES=', '/sys/bus/spi/devices/'):
+            self.assertIn(needle, evidence)
+        self.assertTrue(evidence.endswith('; true'))
 
     def test_touch_snap_evidence_covers_power_regions_pins_rtc_and_taint(self):
         evidence = probe_once.EVIDENCE['j72_touch_snap']

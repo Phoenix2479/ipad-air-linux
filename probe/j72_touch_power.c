@@ -80,14 +80,15 @@
 struct touch_pin {
 	const char *name;
 	unsigned int reg;
-	u32 boot;
+	u32 boot, rerun;
 };
 
+/* A finished run leaves 79 low instead of iBoot's high; both are safe. */
 static const struct touch_pin pins[] = {
-	{ "reset", 15, 0x00072602 },
-	{ "enable_cs", 79, 0x00072203 },
-	{ "atn", 111, 0x00070381 },
-	{ "sync", 119, 0x00072602 },
+	{ "reset", 15, 0x00072602, 0x00072602 },
+	{ "enable_cs", 79, 0x00072203, 0x00072202 },
+	{ "atn", 111, 0x00070381, 0x00070381 },
+	{ "sync", 119, 0x00072602, 0x00072602 },
 };
 
 enum {
@@ -257,7 +258,8 @@ static int check_boot_state(struct touch_power *tp)
 
 	for (i = 0; i < PIN_COUNT; i++) {
 		log_pin(i, tp->pin_before[i]);
-		if (tp->pin_before[i] != pins[i].boot)
+		if (tp->pin_before[i] != pins[i].boot &&
+		    tp->pin_before[i] != pins[i].rerun)
 			return -EINVAL;
 	}
 	for (i = 0; i < ARRAY_SIZE(pmic_regs); i++) {
@@ -689,6 +691,7 @@ static void put_refs(struct touch_power *tp)
 	of_node_put(tp->pwm0);
 }
 
+#ifndef J72_TOUCH_POWER_LIB
 static int __init j72_touch_power_init(void)
 {
 	struct touch_power tp = {};
@@ -762,3 +765,4 @@ module_init(j72_touch_power_init);
 module_exit(j72_touch_power_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("One-shot J72 touch Stage B power and clock sequence; reset stays asserted");
+#endif

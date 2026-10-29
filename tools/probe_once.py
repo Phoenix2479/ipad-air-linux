@@ -199,15 +199,42 @@ def touch_power_problems(out, fields):
     return problems
 
 
+TOUCH_ID_COMMAND = (
+    TOUCH_POWER_COMMAND.replace('j72_touch_power', 'j72_touch_id') +
+    "; d=/sys/bus/platform/devices/20a088000.spi-status; "
+    "l=$(busybox readlink $d/driver 2>/dev/null); printf 'SPI_DRIVER=%s\\n' \"${l##*/}\"; "
+    "printf 'SPI_MASTERS=%s\\n' \"$(ls /sys/class/spi_master/ 2>/dev/null)\"; "
+    "printf 'SPI2_GENPD='; grep -E '^spi2[[:space:]]' "
+    f"{GENPD} 2>/dev/null || echo missing")
+
+TOUCH_ID_EVIDENCE = (
+    TOUCH_POWER_EVIDENCE.replace('j72_touch_power', 'j72_touch_id|spi0')
+    .replace('; true', '') +
+    "; echo \"EV_SPI_DEVICES=$(ls /sys/bus/spi/devices/ 2>/dev/null)\"; true")
+
+
+def touch_id_problems(out, fields):
+    problems = [p.replace('j72_touch_power', 'j72_touch_id')
+                for p in touch_power_problems(out, fields)]
+    if fields.get('SPI_DRIVER', '').strip() != 'j72-spi-ctrl':
+        problems.append('20a088000.spi-status is not bound to j72-spi-ctrl')
+    if fields.get('SPI_MASTERS', '').strip() != 'spi0':
+        problems.append('expected exactly one SPI controller, spi0')
+    if not re.fullmatch(r'spi2\s+on(\s.*)?', fields.get('SPI2_GENPD', '').strip()):
+        problems.append('genpd summary does not show spi2 on')
+    return problems
+
+
 MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
     'j72_touch_snap': (TOUCH_SNAP_COMMAND, touch_snap_problems),
     'j72_touch_power': (TOUCH_POWER_COMMAND, touch_power_problems),
+    'j72_touch_id': (TOUCH_ID_COMMAND, touch_id_problems),
 }
 
 EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE,
-            'j72_touch_power': TOUCH_POWER_EVIDENCE}
+            'j72_touch_power': TOUCH_POWER_EVIDENCE, 'j72_touch_id': TOUCH_ID_EVIDENCE}
 
 
 def check(shell, name):
@@ -285,7 +312,7 @@ def main():
             log.write('BEFORE\n' + shell.run(evidence) + '\n')
         pattern = name.replace('_', '[-_]')
         out = shell.run(f'/tmp/j72-load-once /tmp/{name}.ko; printf "\\nLOADER_RC=%s\\n" "$?"; '
-                        f"dmesg | grep -E '{pattern}|spi-status|spi_master|power-controller@200a8|pwm0|power-controller@20070|pmgr'; "
+                        f"dmesg | grep -E '{pattern}|spi-status|spi0|spi_master|power-controller@200a8|pwm0|power-controller@20070|pmgr'; "
                         'printf "TAINT="; cat /proc/sys/kernel/tainted; echo FULL_DMESG; dmesg',
                         timeout=60)
         log.write('LOAD\n' + out + '\n')

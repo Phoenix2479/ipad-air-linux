@@ -220,6 +220,12 @@ all-zero pre-write block appeared in all three runs while PMGR read
 `0x000002ff`, including the passing run 3. All-zero may simply be the reset
 value of an unconfigured block, but that is unproven.
 
+After run 3 the source gained two changes that do not alter the sequence.
+`J72_TOUCH_POWER_LIB` hides the module entry point so Stage C1 can include
+this file. The preflight also accepts pin 79 low (`0x00072202`), the state a
+finished run leaves, so a later stage can be retried without a restart. The
+run 3 module (`22ffdc3b...`) predates both.
+
 ## Stage C
 
 Stage B does not release reset and makes no transfer, so it cannot establish
