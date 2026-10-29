@@ -285,6 +285,14 @@ class ProbeOnceCheckTests(unittest.TestCase):
             self.assertIn(needle, evidence)
         self.assertTrue(evidence.endswith('; true'))
 
+    def test_renamed_touch_driver_uses_its_own_name(self):
+        problems, commands = check('j72_touch_d2', GENERIC + TOUCH_ID)
+        self.assertEqual(problems, [])
+        self.assertIn('/sys/bus/platform/devices/j72_touch_d2', commands[0])
+        problems, _ = check('j72_touch_d2', GENERIC + TOUCH_ID.replace('POWER_DEV=no', 'POWER_DEV=yes'))
+        self.assertEqual(problems, ['platform device j72_touch_d2 already exists'])
+        self.assertIn('/sys/kernel/debug/j72_touch_d2/stats', probe_once.EVIDENCE['j72_touch_d2'])
+
     def test_touch_fw_uploads_both_files_privately_to_lib_firmware(self):
         files = probe_once.FIRMWARE['j72_touch_fw']
         self.assertEqual([remote for _, remote in files],

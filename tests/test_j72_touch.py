@@ -21,7 +21,7 @@ import test_j72_touch_power as power  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / 'probe/j72_touch.c'
-BUILT = ROOT / 'source/build/j72-touch-20261029/j72_touch.ko'
+BUILT = ROOT / 'source/build/j72-touch-d2-20261029/j72_touch_d2.ko'
 NAME = 'j72_touch'
 ALLOWED_IMPORTS = tuple(sorted(set(c2.ALLOWED_IMPORTS) | {
     'mutex_init_generic', 'timer_init_key', 'input_alloc_absinfo', 'cancel_delayed_work_sync', 'debugfs_create_dir',
@@ -33,7 +33,8 @@ ALLOWED_IMPORTS = tuple(sorted(set(c2.ALLOWED_IMPORTS) | {
     'input_set_capability', 'input_unregister_device', 'queue_delayed_work_on',
     'request_threaded_irq', 'seq_lseek', 'seq_printf', 'seq_read', 'simple_open',
     'single_open', 'single_release', 'system_percpu_wq', '___ratelimit',
-    'mutex_lock', 'mutex_unlock',
+    'mutex_lock', 'mutex_unlock', 'pinctrl_get', 'pinctrl_lookup_state', 'pinctrl_put',
+    'pinctrl_register_mappings', 'pinctrl_select_state', 'pinctrl_unregister_mappings',
 }))
 
 D_STUBS = r'''
@@ -233,6 +234,70 @@ static void input_report_abs(struct input_dev *dev, unsigned int code, int value
 static void input_mt_sync_frame(struct input_dev *dev) {}
 static void input_sync(struct input_dev *dev) { printf("EVENT input_sync\n"); }
 
+struct pinctrl_map { const char *dev_name, *name, *ctrl, *group, *function; };
+#define PIN_MAP_MUX_GROUP(dev, state, pctl, grp, func) { dev, state, pctl, grp, func }
+struct pinctrl { int unused; };
+struct pinctrl_state { const char *name, *function; };
+static struct pinctrl sync_handle;
+static struct pinctrl_state pin_states[2];
+static const struct pinctrl_map *pin_maps;
+static int maps_registered, pinctrl_handles;
+
+static int pinctrl_register_mappings(const struct pinctrl_map *m, unsigned int n)
+{
+    printf("EVENT pinctrl_map %s %s %s %s %s\n", m[0].dev_name, m[0].ctrl, m[0].group,
+           m[0].function, m[1].function);
+    if (fault_once("pinctrl_map"))
+        return -ENOMEM;
+    pin_maps = m;
+    maps_registered++;
+    return 0;
+}
+static void pinctrl_unregister_mappings(const struct pinctrl_map *m)
+{
+    printf("EVENT pinctrl_unmap\n");
+    if (pinctrl_handles)
+        violation("mapping removed while a handle is held");
+    maps_registered--;
+}
+static struct pinctrl *pinctrl_get(struct device *dev)
+{
+    printf("EVENT pinctrl_get %s\n", dev->name);
+    if (!maps_registered || strcmp(dev->name, pin_maps[0].dev_name))
+        violation("pinctrl handle for an unmapped device");
+    if (gpio_descs[3].requested)
+        violation("pin 119 muxed while its GPIO line is requested");
+    if (fault_once("pinctrl_get"))
+        return ERR_PTR(-ENODEV);
+    pinctrl_handles++;
+    return &sync_handle;
+}
+static struct pinctrl_state *pinctrl_lookup_state(struct pinctrl *p, const char *name)
+{
+    for (int i = 0; i < 2; i++)
+        if (!strcmp(pin_maps[i].name, name)) {
+            pin_states[i].name = name;
+            pin_states[i].function = pin_maps[i].function;
+            return &pin_states[i];
+        }
+    return ERR_PTR(-ENODEV);
+}
+static int pinctrl_select_state(struct pinctrl *p, struct pinctrl_state *st)
+{
+    unsigned int periph = !strcmp(st->function, "periph1");
+
+    printf("EVENT pinctrl_select %s\n", st->name);
+    if (fault_once(periph ? "sync_select" : "sync_off_select"))
+        return -EINVAL;
+    pins_mmio[119] = (pins_mmio[119] & ~P_PERIPH) | (periph << 5) | P_INPUT_ENABLE;
+    return 0;
+}
+static void pinctrl_put(struct pinctrl *p)
+{
+    printf("EVENT pinctrl_put\n");
+    pinctrl_handles--;
+}
+
 struct dentry { int unused; };
 static struct dentry debugfs_dir;
 struct file { void *private_data; };
@@ -311,6 +376,12 @@ static void queue_contact(unsigned char id, unsigned char state, int x, int y)
 
 static unsigned char expected_sequence = 1;
 
+static void power_off_n1(void)
+{
+    frame_head = frame_tail;
+    pins_mmio[111] |= P_DATA;
+}
+
 static void frame_reply(const unsigned char *tx, unsigned char *rx, unsigned int len)
 {
     unsigned int n = frame_head != frame_tail ? frame_lengths[frame_head % 8] : 0;
@@ -371,8 +442,9 @@ MAIN_D = r'''
     }
     spi_report();
     fw_report();
-    if (irq_requested_count || inputs_alive)
-        printf("LEAK irq=%d inputs=%d\n", irq_requested_count, inputs_alive);
+    if (irq_requested_count || inputs_alive || maps_registered || pinctrl_handles)
+        printf("LEAK irq=%d inputs=%d maps=%d pinctrl=%d\n", irq_requested_count,
+               inputs_alive, maps_registered, pinctrl_handles);
 '''
 
 SCENARIOS = {
@@ -391,6 +463,14 @@ SCENARIOS = {
 
 def patch_stubs():
     s = c2.patch_stubs().replace(f'"{c2.NAME}"', f'"{NAME}"')
+    # An unpowered N1 drops its frames, and the pull-up takes ATN high.
+    old = '    pmic_update_count[reg]++;\n'
+    if s.count(old) != 1:
+        raise AssertionError('PMIC update stub anchor changed')
+    s = s.replace(old, old + '    if (reg == 0x85 && !(value & 0x02))\n'
+                              '        power_off_n1();\n')
+    s = s.replace('static int regmap_update_bits(',
+                  'static void power_off_n1(void);\nstatic int regmap_update_bits(', 1)
     return s.replace('#include <string.h>', '#include <string.h>\n#include <stdarg.h>', 1)
 
 
@@ -408,6 +488,11 @@ def fw_stubs():
             '        return;\n'
             '    }\n')
     s = s.replace(old, hook + old)
+    execute = '        fw_executed = !fault("execute_dead");\n'
+    if s.count(execute) != 1:
+        raise AssertionError('fake N1 execute anchor changed')
+    s = s.replace(execute, execute + '        if (fault("drain_corrupt") || fault("boot_frame"))\n'
+                                      '            queue_contact(9, 1, 0, 0);\n')
     return s.replace('static void n1_reply(const unsigned char *tx',
                      'static int frame_reply_corrupt_hold;\n' + FRAME_N1 +
                      'static void n1_reply(const unsigned char *tx', 1)
@@ -431,7 +516,9 @@ class TouchDriverTests(unittest.TestCase):
         sources = [power.PROBE.read_text(), c1.PROBE.read_text(),
                    c2.PROBE.read_text(), cls.source]
         module = ('#define N1_BUFFER 65536\n#define J72_TOUCH_POWER_LIB\n'
-                  '#define J72_TOUCH_ID_LIB\n#define J72_TOUCH_FW_LIB\n' +
+                  '#define J72_TOUCH_ID_LIB\n#define J72_TOUCH_FW_LIB\n'
+                  'struct touch_power;\nstatic int sync_on(struct touch_power *tp);\n'
+                  '#define J72_TOUCH_SYNC_HOOK sync_on\n' +
                   '\n'.join(line for text in sources for line in text.splitlines()
                             if not line.startswith(('#include', '#define J72_TOUCH',
                                                     '#define N1_BUFFER'))))
@@ -545,6 +632,50 @@ class TouchDriverTests(unittest.TestCase):
                                      'x=10100 y=10100 slots=32'),
                         events.index('request_irq 77 0xb j72_touch'))
 
+    def test_display_sync_follows_the_ios_order_and_is_restored(self):
+        init, events, logs, lines = self.run_fixture('touch')
+        self.assertEqual(init, 0)
+        self.safe(lines)
+        self.assertIn('pinctrl_map j72_touch 20e300000.pinctrl PIN119 periph1 gpio', events)
+        self.assertTrue(c2.subsequence(
+            ['xfer 2 19 c1', 'usleep 10000 12000', 'gpio_free 119',
+             'pinctrl_get j72_touch', 'pinctrl_select sync-on', 'xfer 16 1a a1 18 e1 18 e1',
+             'gpio_dir_out 15 1'], [e[:25] if e.startswith('xfer 16') else e for e in events]),
+            events)
+        self.assertIn('gpio119 sync raw=0x00072622 mode=1 data=0 periph=1', '\n'.join(logs))
+        stop = events[events.index('free_irq'):]
+        self.assertTrue(c2.subsequence(
+            ['gpio_dir_out 15 0', 'spi_unregister', 'pinctrl_select sync-off', 'pinctrl_put',
+             'pinctrl_unmap', 'gpio_request 119 j72_touch 0', 'gpio_dir_out 119 0',
+             'writel 0x20a118020 0x4000', 'update pmic 0x85 0x2 0x0'], stop), stop)
+
+    def test_sync_failures_unwind_and_restore_pin_119(self):
+        for fault in ('pinctrl_map', 'pinctrl_get', 'sync_select'):
+            with self.subTest(fault=fault):
+                init, events, logs, lines = self.run_fixture('none', fault)
+                self.assertNotEqual(init, 0)
+                self.safe(lines, irq_ran=False)
+                self.check_order(events)
+                self.assertNotIn('gpio_dir_out 15 1', events)
+                self.assertRegex('\n'.join(logs), r'stopped .* cleanup=0')
+
+    def test_a_pending_boot_frame_is_drained_without_events(self):
+        init, events, logs, lines = self.run_fixture('none', 'boot_frame')
+        self.assertEqual(init, 0)
+        self.safe(lines)
+        text = '\n'.join(logs)
+        self.assertIn('drain 0 atn_asserted=1', text)
+        self.assertIn('drain 1 atn_asserted=0', text)
+        self.assertNotIn('input_slot', ' '.join(events))
+        stats = next(line for line in lines if line.startswith('STATS '))
+        self.assertIn('frames=1', stats)
+
+    def test_drain_stops_when_atn_is_high_without_reading(self):
+        _, events, logs, _ = self.run_fixture()
+        self.assertIn('drain 0 atn_asserted=0', '\n'.join(logs))
+        before_irq = events[:events.index('request_irq 77 0xb j72_touch')]
+        self.assertFalse([e for e in before_irq if e.startswith('xfer 16 eb')])
+
     def test_stop_logs_pin_111_in_its_post_irq_state(self):
         _, _, logs, _ = self.run_fixture('touch')
         self.assertIn('gpio111 atn raw=0x0000038f mode=7', '\n'.join(logs))
@@ -568,6 +699,7 @@ class TouchDriverTests(unittest.TestCase):
     def test_source_never_drives_atn_or_logs_frame_transfers(self):
         self.assertNotIn('gpiod_direction_output_raw(t->tp.gpio[PIN_ATN]', self.source)
         self.assertNotRegex(self.source, r'n1_xfer\(id, "')
+        self.assertIn('N1_TRACE_XFERS 24', self.source)
         self.assertIn('#define J72_TOUCH_FW_LIB\n#include "j72_touch_fw.c"', self.source)
 
     @unittest.skipUnless(BUILT.exists(), 'built module receipt not present')

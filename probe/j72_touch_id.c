@@ -187,7 +187,12 @@ static int identify(struct touch_power *tp, struct touch_id *id)
 	if (ret)
 		return ret;
 	usleep_range(10000, 12000);
-	/* Display sync (119 in periph mode) is left low; C1 tests the ROM only. */
+#ifdef J72_TOUCH_SYNC_HOOK
+	/* iOS selects display sync here, between the wake word and the NOP. */
+	ret = J72_TOUCH_SYNC_HOOK(tp);
+	if (ret)
+		return ret;
+#endif
 	ret = n1_boot_nop(id, "boot_nop");
 	if (ret)
 		return ret;

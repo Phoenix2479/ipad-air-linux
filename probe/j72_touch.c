@@ -9,6 +9,9 @@
  * Writing to /sys/kernel/debug/<module>/stop tears everything down to the
  * safe rerun state, so a corrected build can load on the same boot.
  */
+struct touch_power;
+static int sync_on(struct touch_power *tp);
+#define J72_TOUCH_SYNC_HOOK sync_on
 #define J72_TOUCH_FW_LIB
 #include "j72_touch_fw.c"
 
@@ -17,11 +20,14 @@
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/pinctrl/machine.h>
 #include <linux/seq_file.h>
 #include <linux/workqueue.h>
 
 #define N1_SLOTS 32
 #define N1_TRACE_FRAMES 16
+#define N1_TRACE_XFERS 24
 
 struct touch {
 	struct touch_power tp;
@@ -37,11 +43,88 @@ struct touch {
 	int irq;
 	u8 sequence;
 	bool started, running, stopped, irq_requested, irq_masked;
-	unsigned int recovery_attempts, irq_errors, traced;
+	unsigned int recovery_attempts, irq_errors, traced, traced_xfers;
 	unsigned long irqs, frames, empty_frames, contact_frames, errors;
 };
 
 static struct touch touch;
+
+/*
+ * Display sync is pin 119's peripheral function 1 (iOS "mode 3"). The pin
+ * controller's mux is strict, so the GPIO line is released while it is
+ * muxed. The mapping belongs to the ps_pwm0 platform device, which exists
+ * from pwm_on() until power_down().
+ */
+static const struct pinctrl_map sync_map[] = {
+	PIN_MAP_MUX_GROUP(KBUILD_MODNAME, "sync-on", PINS_LABEL, "PIN119", "periph1"),
+	PIN_MAP_MUX_GROUP(KBUILD_MODNAME, "sync-off", PINS_LABEL, "PIN119", "gpio"),
+};
+static struct pinctrl *sync_pins;
+static bool sync_mapped;
+
+static int sync_on(struct touch_power *tp)
+{
+	struct pinctrl_state *on;
+	u32 reg;
+	int ret;
+
+	ret = pinctrl_register_mappings(sync_map, ARRAY_SIZE(sync_map));
+	if (ret)
+		return ret;
+	sync_mapped = true;
+	gpiochip_free_own_desc(tp->gpio[PIN_SYNC]);
+	tp->gpio[PIN_SYNC] = NULL;
+	sync_pins = pinctrl_get(&tp->pdev->dev);
+	if (IS_ERR(sync_pins)) {
+		ret = PTR_ERR(sync_pins);
+		sync_pins = NULL;
+		return ret;
+	}
+	on = pinctrl_lookup_state(sync_pins, "sync-on");
+	if (IS_ERR(on))
+		return PTR_ERR(on);
+	ret = pinctrl_select_state(sync_pins, on);
+	if (ret)
+		return ret;
+	ret = read_pin(tp, pins[PIN_SYNC].reg, &reg);
+	if (ret)
+		return ret;
+	log_pin(PIN_SYNC, reg);
+	return FIELD_GET(REG_GPIOx_PERIPH, reg) == 1 ? 0 : -EIO;
+}
+
+/* Back to GPIO, then the line is requested again and driven low. */
+static int sync_off(struct touch_power *tp)
+{
+	struct gpio_chip *chip;
+	struct gpio_desc *desc;
+	struct pinctrl_state *off;
+	int ret = 0, err;
+
+	if (sync_pins) {
+		off = pinctrl_lookup_state(sync_pins, "sync-off");
+		ret = IS_ERR(off) ? PTR_ERR(off) : pinctrl_select_state(sync_pins, off);
+		pinctrl_put(sync_pins);
+		sync_pins = NULL;
+	}
+	if (sync_mapped) {
+		pinctrl_unregister_mappings(sync_map);
+		sync_mapped = false;
+	}
+	if (tp->gdev && !tp->gpio[PIN_SYNC] && tp->ngpio > PIN_SYNC) {
+		chip = gpio_device_get_chip(tp->gdev);
+		desc = chip ? gpiochip_request_own_desc(chip, pins[PIN_SYNC].reg,
+							KBUILD_MODNAME, 0, GPIOD_ASIS)
+			    : ERR_PTR(-ENODEV);
+		if (IS_ERR(desc))
+			return ret ? ret : PTR_ERR(desc);
+		tp->gpio[PIN_SYNC] = desc;
+		err = drive_pin(tp, PIN_SYNC, 0);
+		if (err && !ret)
+			ret = err;
+	}
+	return ret;
+}
 
 static int atn_asserted(struct touch *t)
 {
@@ -130,6 +213,22 @@ static int parse_contacts(struct touch *t, const u8 *report, size_t length)
 	return 0;
 }
 
+/* Frames carry touch data, not firmware, so the first few are traced. */
+static const char *frame_phase(struct touch *t, const char *phase)
+{
+	return t->traced_xfers++ < N1_TRACE_XFERS ? phase : NULL;
+}
+
+static int bad_frame(struct touch *t, const char *check, size_t len)
+{
+	struct touch_id *id = &t->id;
+
+	pr_err(KBUILD_MODNAME ": frame %s check failed: seq=%u len=%zu rx=%*ph tail=%*ph\n",
+	       check, t->sequence, len, (int)min_t(size_t, len, 16), id->rx,
+	       (int)min_t(size_t, len, 4), id->rx + len - min_t(size_t, len, 4));
+	return -EBADMSG;
+}
+
 /* Returns 1 for a consumed frame, 0 for an empty controller, or an errno. */
 static int read_frame(struct touch *t, bool report_events)
 {
@@ -142,12 +241,13 @@ static int read_frame(struct touch *t, bool report_events)
 	id->tx[0] = 0xeb;
 	id->tx[1] = t->sequence;
 	put_unaligned_le16(n1_sum(id->tx, 14), id->tx + 14);
-	ret = n1_xfer(id, NULL, 16);
+	ret = n1_xfer(id, frame_phase(t, "frame_request"), 16);
 	if (ret)
 		return ret;
-	if ((id->rx[0] & 0xf0) != 0xe0 ||
-	    get_unaligned_le16(id->rx + 14) != (u16)n1_sum(id->rx, 14))
-		return -EBADMSG;
+	if ((id->rx[0] & 0xf0) != 0xe0)
+		return bad_frame(t, "request-type", 16);
+	if (get_unaligned_le16(id->rx + 14) != (u16)n1_sum(id->rx, 14))
+		return bad_frame(t, "request-checksum", 16);
 	length = get_unaligned_le16(id->rx + 1);
 	if (!length) {
 		t->empty_frames++;
@@ -161,16 +261,19 @@ static int read_frame(struct touch *t, bool report_events)
 	id->tx[1] = t->sequence;
 	id->tx[2] = 1;
 	put_unaligned_le16(n1_sum(id->tx, 14), id->tx + wire_length - 2);
-	ret = n1_xfer(id, NULL, wire_length);
+	ret = n1_xfer(id, frame_phase(t, "frame_response"), wire_length);
 	if (ret)
 		return ret;
-	if ((id->rx[0] != 0xea && id->rx[0] != 0xeb) || (n1_sum(id->rx, 5) & 0xff))
-		return -EBADMSG;
+	if (id->rx[0] != 0xea && id->rx[0] != 0xeb)
+		return bad_frame(t, "response-type", wire_length);
+	if (n1_sum(id->rx, 5) & 0xff)
+		return bad_frame(t, "header-checksum", wire_length);
 	payload_length = get_unaligned_le16(id->rx + 2);
-	if (payload_length < 2 || payload_length > length ||
-	    get_unaligned_le16(id->rx + wire_length - 2) !=
+	if (payload_length < 2 || payload_length > length)
+		return bad_frame(t, "payload-length", wire_length);
+	if (get_unaligned_le16(id->rx + wire_length - 2) !=
 	    (u16)n1_sum(id->rx + 5, payload_length - 2))
-		return -EBADMSG;
+		return bad_frame(t, "payload-checksum", wire_length);
 	t->sequence = t->sequence == 1 ? 2 : 1;
 	t->frames++;
 	if (report_events && payload_length > 2) {
@@ -215,19 +318,28 @@ static int irq_frame(struct touch *t)
 	return ret;
 }
 
+/*
+ * Like the IRQ path, read only while ATN is asserted. On J72 the request
+ * reply kept a 14-byte length after its frame was read, and the next read
+ * returned nothing, so the length alone cannot end a drain.
+ */
 static int drain(struct touch *t, bool report_events)
 {
-	int i, ret = 0;
+	int i, ret, asserted;
 
 	for (i = 0; i < 8; i++) {
+		asserted = atn_asserted(t);
+		if (t->traced_xfers < N1_TRACE_XFERS)
+			pr_info(KBUILD_MODNAME ": drain %d atn_asserted=%d\n", i, asserted);
+		if (asserted <= 0)
+			return asserted;
 		ret = read_frame(t, report_events);
-		if (ret <= 0)
-			break;
+		if (ret < 0)
+			return ret;
+		if (!ret)
+			return -EBUSY;
 	}
-	if (ret < 0 || i == 8)
-		return ret < 0 ? ret : -EOVERFLOW;
-	ret = atn_asserted(t);
-	return ret > 0 ? -EBUSY : ret;
+	return -EOVERFLOW;
 }
 
 static void mask_irq(struct touch *t)
@@ -420,6 +532,10 @@ static int touch_shutdown(struct touch *t)
 		t->input = NULL;
 	}
 	cleanup = stop_device(&t->tp, &t->id);
+	/* apple_n1 order: reset, then display sync off, then clock and rails. */
+	err = sync_off(&t->tp);
+	if (err && !cleanup)
+		cleanup = err;
 	err = power_down(&t->tp);
 	if (err && !cleanup)
 		cleanup = err;

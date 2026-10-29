@@ -676,8 +676,10 @@ static void release_gpios(struct touch_power *tp)
 {
 	int i;
 
+	/* A stage that muxes a pin away from GPIO leaves its slot NULL. */
 	for (i = tp->ngpio - 1; i >= 0; i--)
-		gpiochip_free_own_desc(tp->gpio[i]);
+		if (tp->gpio[i])
+			gpiochip_free_own_desc(tp->gpio[i]);
 	tp->ngpio = 0;
 	if (tp->gdev) {
 		gpio_device_put(tp->gdev);
