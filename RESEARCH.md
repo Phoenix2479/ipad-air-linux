@@ -270,10 +270,31 @@ constant `0x0044b82fa09b5a53`, applied after a 9-bit shift and before an
 11-bit shift, matched exact division by `10^9` in 200,000 random cases. The
 two arguments are therefore nanoseconds converted to input-clock cycles.
 
-Still unresolved: which register holds the period and which holds the
-high time, the input rate returned by slot `0x540`, the provider methods
-behind slots `0x560` and `0x568`, and the nanosecond values requested for the
-32,768 Hz touch clock. No PWM operation was performed.
+The touch clock values were resolved on 29 October. The full trace is in
+`.omx/work/j72-pwm-timing-20261029/result.json`. Spot checks here confirmed
+the arithmetic at `0xfffffff007d57834`, the live ADT rate and the PWM node.
+
+- **Register roles.** The setup at `0xfffffff007d577f8` computes period as
+  `(rate + hz/2) / hz`. High time is `(period * duty + 2^31) >> 32`, and low
+  time is `period - high`. Channel register `c*8` takes the high time and
+  `c*8+4` takes the low time, both in input-clock cycles.
+- **Input rate.** Slot `0x540` requests `nclk`. The PWM node has no
+  `clock-ids`, so the request falls back to the platform fixed frequency.
+  That is the live `/cpus/cpu0` value of 24,000,000 Hz.
+- **Touch request.** The touch enable near `0xfffffff007e958dc` passes no
+  frequency or duty. The `pwmC` dispatch then uses `default-hz` 32,768 and a
+  50% duty. That gives period 732 and both times 366, or about 32,787 Hz. The
+  iPad 5 uses the same 24 MHz / 732 divider.
+- **Write order.** iOS enables clock gate 69 (`ps_pwm0`, PMGR `0x20070`),
+  then writes `0x10 = 366`, `0x14 = 366` and `0x20 = 0x4003`. It does not
+  wait. Disabling writes `0x20 = 0x4000` and then gates the clock.
+- **Base address.** The PWM block is `/arm-io/pwm` at `0x20a118000`, size
+  `0x1000`.
+
+Control-bit meanings are inferences. The low two bits appear to run the
+output. Bit 14 stays set while stopped. `0x204` selects a one-shot pulse.
+Still unresolved are the exact hardware period, `high + low` or two cycles
+more, and channel 2's pin routing. No PWM operation was performed.
 
 ### OrchardLinux touch work on newer iPads
 
