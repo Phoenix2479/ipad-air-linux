@@ -228,7 +228,7 @@ def main():
             log.write('BEFORE\n' + shell.run(evidence) + '\n')
         pattern = name.replace('_', '[-_]')
         out = shell.run(f'/tmp/j72-load-once /tmp/{name}.ko; printf "\\nLOADER_RC=%s\\n" "$?"; '
-                        f"dmesg | grep -E '{pattern}|spi-status|spi_master|power-controller@200a8'; "
+                        f"dmesg | grep -E '{pattern}|spi-status|spi_master|power-controller@200a8|pwm0|power-controller@20070|pmgr'; "
                         'printf "TAINT="; cat /proc/sys/kernel/tainted; echo FULL_DMESG; dmesg',
                         timeout=60)
         log.write('LOAD\n' + out + '\n')
