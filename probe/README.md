@@ -57,6 +57,22 @@ It exits on failure without a retry. BusyBox 1.37.0 `insmod` can invoke module
 initialization again after a failed first load. Use the single-call loader for
 this experiment.
 
+## Boot the diagnostic kernel
+
+`run.sh` boots the original desktop kernel. These modules only load on
+`7.0.12-j72baseline`, so use the experimental payload instead. Check its hash
+against `source/build/j72-spi-status/receipt.json` (`12657342...`), then run:
+
+```sh
+cd ~/iPad-Air-Linux/source/remote_boot
+./remoteboot.sh boot \
+  ~/iPad-Air-Linux/source/build/j72-spi-status/m1n1-j72-spi-status.macho \
+  ~/iPad-Air-Linux/boot/m1n1-monitor-stub.macho
+```
+
+Enter DFU manually when prompted, using the sequence in the top-level README. Do
+not start `tools/session.py`; the desktop has not been verified on this kernel.
+
 ## Interpret the result
 
 After a fresh experimental boot, verify the model and exact kernel release

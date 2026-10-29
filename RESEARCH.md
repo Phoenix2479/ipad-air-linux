@@ -231,3 +231,68 @@ data write occurred, but the CTRL command may have reset internal FIFOs.
 The next source investigation must resolve those A7 control-bit semantics and
 readback expectations before modifying the test or starting communication.
 The implementation and recorded limits are in [probe/ENABLE.md](probe/ENABLE.md).
+
+### A7 driver never reads the control register
+
+On 29 October a read-only scan listed all 51 register accesses in the matching
+A7 `AppleSamsungSPI` driver. The driver has one 32-bit read accessor and one
+32-bit write accessor. Both use the mapped base at object offset `0xf8`. The
+remaining `0xf8` uses are vtable property calls with string keys, not MMIO.
+
+CLKCFG/CTRL at `0x00` has three writes and no reads. Setup writes `0`. The stop
+path before provider shutdown writes `0`. The virtual program routine at
+`0xfffffff007d67ca8` writes the cached `0xd` last, after DIV, IDLE, STATUS and
+CFG. The A7 driver never writes `0x1` or `0xc` alone. The newer Linux driver
+also only writes CTRL: FIFO resets `0xc`, then RUN `0x1`, then `0`.
+
+The strict `0xd` readback check in `j72_spi_enable` therefore had no source
+basis. Readback `0x1` fits self-clearing reset bits 2 and 3 with a latched RUN
+bit 0. That remains an inference. Neither driver establishes the A7 readback
+contract. It does not establish a clock output, pin activity or FIFO reset
+either. The access list, script and structured result are in
+`.omx/work/j72-spi-ctrl-20261029/`.
+
+### PWM channel registers and time conversion
+
+The `AppleS5L8920XPWM` configure method at `0xfffffff007de0520` derives every
+offset from channel `c`. It writes its first value to `c*8`, its second value
+to `c*8+4`, and a control word to `0x18+c*4`. Channel 2 therefore uses `0x10`,
+`0x14` and `0x20`. The control word is `0x4003`, or `0x4403` when descriptor
+word 1 is nonzero. A nonzero fifth argument adds `0x204`. Before the first
+channel turns on, the method calls provider slots `0x568(1,0,0)` and then
+`0x560(1,0)`. The disable method at `0xfffffff007ddfd48` writes control
+`0x4000` or `0`. After the last channel turns off, it calls `0x560(0,0)` and
+then `0x568(0,0,0)`.
+
+The `AppleARMPWM` caller at `0xfffffff007d585ec` reads a rate from PWM slot
+`0x540`. Each of its two time arguments becomes `floor(rate * t / 10^9)`. The
+constant `0x0044b82fa09b5a53`, applied after a 9-bit shift and before an
+11-bit shift, matched exact division by `10^9` in 200,000 random cases. The
+two arguments are therefore nanoseconds converted to input-clock cycles.
+
+Still unresolved: which register holds the period and which holds the
+high time, the input rate returned by slot `0x540`, the provider methods
+behind slots `0x560` and `0x568`, and the nanosecond values requested for the
+32,768 Hz touch clock. No PWM operation was performed.
+
+### OrchardLinux touch work on newer iPads
+
+On 29 October `shaynelegault/omarchy-a` was a fork of `OrchardLinux/omarchy-a`.
+It was zero commits ahead and eight behind. Its three commits were already
+upstream. Upstream adds a backlight helper that selects the single
+`/sys/class/backlight` entry instead of the J71b path. The `cli` submodule
+now builds Z2 firmware from preconstructed boot packets into a `Z2FW` container.
+
+`OrchardLinux/hardware` carries `apple_z2` patches and
+`docs/bring-up/touch-calibration.md`. Touch is reported working on J71b
+(iPad 6, A10). That driver sends per-unit calibration as HBPP blob packets. The
+`hbpp-version` property selects the length encoding. The same tree adds an Apple
+PMIC touch-supply regulator driver for D111. Orchard's `devices/j72b` is the
+iPad 6 Cellular, not this J72 iPad Air. No Orchard file found here supports the
+A7 `spi-1,samsung` controller. The Z2 protocol and calibration format are the
+reusable parts. SPI, PWM and power sequencing still need A7 evidence.
+
+The J72 generic tree lists one touch calibration reference,
+`multi-touch-calibration = syscfg/MtCl/0x400`. That matches the 1,024 bytes
+recovered privately. Neither saved J72 tree JSON contains an `hbpp-version`
+property, so the HBPP length encoding for J72 is unknown.

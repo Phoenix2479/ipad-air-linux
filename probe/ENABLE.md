@@ -74,3 +74,11 @@ included FIFO-reset commands even though no FIFO data register was written.
 Do not count this strict-check failure as a passing clock test or infer a
 measured clock rate. Confirm the A7 control-bit/readback behavior before revising
 the expected value or issuing transfers. No retry followed this observation.
+
+## 29 October source follow-up
+
+The matching A7 driver writes CTRL `0`, `0` and cached `0xd`. It never reads
+CTRL, and the newer Linux driver never reads it either. The strict `0xd`
+expectation came from the written command, not from either driver. Any revised
+acceptance check must be justified as a bits-2/3 strobe hypothesis. It must not
+be presented as an iOS-confirmed readback value. See [RESEARCH.md](../RESEARCH.md).
