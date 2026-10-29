@@ -407,8 +407,10 @@ entry's enable register.
 | `power_ana` | 525 = `0x020d` | index `0x0d`, ldo14 | `0x0084` | `0x04` |
 | `power_ldo` | 529 = `0x0211` | index `0x11`, ldo18 | `0x0085` | `0x02` |
 
-Ldo14 shares voltage register `0x0398` with ldo15 and ldo16. That register is
-5,000 mV plus 50 mV steps, and these touch arguments do not write it. For
+Ldo14 shares voltage register `0x0398` with ldo15 and ldo16. The iOS table
+reads as 5,000 mV plus 50 mV steps. Review judged that range implausible
+for this LDO, so the unit or base is unresolved. These touch arguments do
+not write it. For
 indexes `0x0d` to `0x0f`, iOS sets register `0x84` bits `0x03` whenever any
 of bits `0x1c` is set, and clears them otherwise. Ldo18 is a switch with no
 voltage field. The iPad 5 uses the same options byte in `pmuL` `0x21f`.
