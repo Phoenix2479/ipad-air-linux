@@ -109,3 +109,4 @@ The [touch snapshot](TOUCH-SNAP.md) reads the touch pins, rails and PWM block, t
 The [touch power Stage B](TOUCH-POWER.md) powers the rails and starts the 32 kHz clock while reset stays asserted, with no transfer.
 The [touch identity Stage C1](TOUCH-ID.md) reuses Stage B, releases reset and reads the N1 bootloader version over SPI, with no firmware.
 The [touch firmware Stage C2](TOUCH-FW.md) adds the calibration and firmware uploads, execute and the report descriptor read.
+The [resident touchscreen driver](TOUCH.md) keeps the N1 running with an ATN interrupt and a multitouch input device.

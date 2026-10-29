@@ -274,6 +274,17 @@ class ProbeOnceCheckTests(unittest.TestCase):
         self.assertTrue(chunks)
         self.assertEqual(set(chunks), {False})
 
+    def test_touch_driver_checks_files_and_evidence(self):
+        problems, commands = check('j72_touch', GENERIC + TOUCH_ID)
+        self.assertEqual(problems, [])
+        self.assertIn('test -e /sys/module/j72_touch;', commands[0].replace(' &&', ';'))
+        self.assertEqual(probe_once.FIRMWARE['j72_touch'], probe_once.FIRMWARE['j72_touch_fw'])
+        evidence = probe_once.EVIDENCE['j72_touch']
+        for needle in ('/proc/interrupts', '/proc/bus/input/devices',
+                       '/sys/kernel/debug/j72_touch/stats', 'j72_touch|spi0'):
+            self.assertIn(needle, evidence)
+        self.assertTrue(evidence.endswith('; true'))
+
     def test_touch_fw_uploads_both_files_privately_to_lib_firmware(self):
         files = probe_once.FIRMWARE['j72_touch_fw']
         self.assertEqual([remote for _, remote in files],

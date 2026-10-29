@@ -233,14 +233,25 @@ def touch_fw_problems(out, fields):
     return [p.replace('j72_touch_id', 'j72_touch_fw') for p in touch_id_problems(out, fields)]
 
 
+TOUCH_COMMAND = TOUCH_ID_COMMAND.replace('j72_touch_id', 'j72_touch')
+TOUCH_EVIDENCE = (
+    TOUCH_ID_EVIDENCE.replace('j72_touch_id', 'j72_touch').replace('; true', '') +
+    "; echo EV_IRQ; grep -E 'j72_touch|Apple-GPIO' /proc/interrupts; "
+    "echo EV_INPUT; cat /proc/bus/input/devices; "
+    "printf 'EV_STATS='; cat /sys/kernel/debug/j72_touch/stats 2>/dev/null || echo none; true")
+
+
+def touch_problems(out, fields):
+    return [p.replace('j72_touch_id', 'j72_touch') for p in touch_id_problems(out, fields)]
+
+
 # Private files go to the device's RAM filesystem only, never into the log.
 FIRMWARE_DIR = PROJECT / 'source/build/j72-touch-firmware-20261029'
-FIRMWARE = {
-    'j72_touch_fw': (
-        (FIRMWARE_DIR / 'apple/j72-n1.bin', '/lib/firmware/apple/j72-n1.bin'),
-        (FIRMWARE_DIR / 'apple/j72-n1-cal.bin', '/lib/firmware/apple/j72-n1-cal.bin'),
-    ),
-}
+TOUCH_FILES = (
+    (FIRMWARE_DIR / 'apple/j72-n1.bin', '/lib/firmware/apple/j72-n1.bin'),
+    (FIRMWARE_DIR / 'apple/j72-n1-cal.bin', '/lib/firmware/apple/j72-n1-cal.bin'),
+)
+FIRMWARE = {'j72_touch_fw': TOUCH_FILES, 'j72_touch': TOUCH_FILES}
 
 
 MODULE_CHECKS = {
@@ -250,11 +261,12 @@ MODULE_CHECKS = {
     'j72_touch_power': (TOUCH_POWER_COMMAND, touch_power_problems),
     'j72_touch_id': (TOUCH_ID_COMMAND, touch_id_problems),
     'j72_touch_fw': (TOUCH_FW_COMMAND, touch_fw_problems),
+    'j72_touch': (TOUCH_COMMAND, touch_problems),
 }
 
 EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE,
             'j72_touch_power': TOUCH_POWER_EVIDENCE, 'j72_touch_id': TOUCH_ID_EVIDENCE,
-            'j72_touch_fw': TOUCH_FW_EVIDENCE}
+            'j72_touch_fw': TOUCH_FW_EVIDENCE, 'j72_touch': TOUCH_EVIDENCE}
 
 
 def check(shell, name):

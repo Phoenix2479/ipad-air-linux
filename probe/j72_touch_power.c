@@ -83,11 +83,15 @@ struct touch_pin {
 	u32 boot, rerun;
 };
 
-/* A finished run leaves 79 low instead of iBoot's high; both are safe. */
+/*
+ * A finished run leaves 79 low instead of iBoot's high. Once the Stage D
+ * interrupt has run, freeing it leaves 111 in group 0 with "input, IRQ off"
+ * (mode 7) instead of iBoot's mode 0. All of these are safe.
+ */
 static const struct touch_pin pins[] = {
 	{ "reset", 15, 0x00072602, 0x00072602 },
 	{ "enable_cs", 79, 0x00072203, 0x00072202 },
-	{ "atn", 111, 0x00070381, 0x00070381 },
+	{ "atn", 111, 0x00070381, 0x0000038f },
 	{ "sync", 119, 0x00072602, 0x00072602 },
 };
 

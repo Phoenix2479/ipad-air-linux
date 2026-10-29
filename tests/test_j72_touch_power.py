@@ -850,6 +850,7 @@ NODE_FAULTS = {
     'boot15': 'pins_mmio[15] = 0x00072603',
     'boot79': 'pins_mmio[79] = 0x00072201',
     'rerun79': 'pins_mmio[79] = 0x00072202',
+    'rerun111': 'pins_mmio[111] = 0x0000038f',
     'boot111': 'pins_mmio[111] = 0x00070380',
     'boot119': 'pins_mmio[119] = 0x00072603',
     'boot84': 'pmic_bytes[0x84] = 0x04',
@@ -1042,7 +1043,7 @@ class TouchPowerTests(unittest.TestCase):
             'boot398': ('pmic398', 0x15),
         }
         for fault in ['machine', *NODE_FAULTS]:
-            if fault in ('node_pmgr_after', 'rerun79'):
+            if fault in ('node_pmgr_after', 'rerun79', 'rerun111'):
                 continue
             with self.subTest(fault=fault):
                 code, events, _, lines = self.run_fixture(fault, -errno.ENXIO)
@@ -1083,6 +1084,11 @@ class TouchPowerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(events, SUCCESS)
         self.assertEqual(self.state(lines), SAFE_FINAL)
+
+    def test_rerun_accepts_pin_111_left_by_a_freed_irq(self):
+        code, events, _, _ = self.run_fixture('rerun111')
+        self.assertEqual(code, 0)
+        self.assertEqual(events, SUCCESS)
 
     def test_pwm0_must_be_off_before_the_run(self):
         code, events, _, _ = self.run_fixture('boot_pmgr')

@@ -31,7 +31,8 @@ struct touch_fw {
 	u8 *prox;
 	unsigned long last_wake;
 	bool wake_valid;
-	size_t control_length;
+	u16 max_packet;
+	s16 x_min, y_min, x_max, y_max;
 };
 
 static int n1_validate_firmware(const struct firmware *fw)
@@ -398,6 +399,11 @@ static int n1_discover(struct touch_fw *f, struct touch_id *id)
 		x_min, x_max, y_min, y_max);
 	if (x_min >= x_max || y_min >= y_max)
 		return -EPROTO;
+	f->max_packet = max_packet;
+	f->x_min = x_min;
+	f->y_min = y_min;
+	f->x_max = x_max;
+	f->y_max = y_max;
 	return 0;
 }
 
@@ -439,6 +445,7 @@ static void put_files(struct touch_fw *f)
 	release_firmware(f->fw);
 }
 
+#ifndef J72_TOUCH_FW_LIB
 static int __init j72_touch_fw_init(void)
 {
 	struct touch_power tp = {};
@@ -531,3 +538,4 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("One-shot J72 touch Stage C2 N1 firmware boot and descriptor read");
 MODULE_FIRMWARE(N1_FIRMWARE);
 MODULE_FIRMWARE(N1_CALIBRATION);
+#endif
