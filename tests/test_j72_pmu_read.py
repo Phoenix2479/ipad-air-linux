@@ -15,6 +15,15 @@ from test_j72_spi_divider import extract_function
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / 'probe/j72_pmu_read.c'
+BUILT = ROOT / 'source/build/j72-pmu-read-20261029/j72_pmu_read.ko'
+ALLOWED_IMPORTS = (
+    '__stack_chk_fail', '_printk', 'dev_get_regmap', 'i2c_find_device_by_fwnode',
+    'init_uts_ns', 'mutex_lock', 'mutex_unlock', 'of_device_is_available',
+    'of_device_is_compatible', 'of_find_compatible_node',
+    'of_machine_compatible_match', 'of_node_get', 'of_node_put',
+    'of_property_read_variable_u32_array', 'put_device', 'regmap_get_val_bytes',
+    'regmap_read', 'strcmp',
+)
 
 STUBS = r'''
 #include <stdio.h>
@@ -111,6 +120,12 @@ class PmuReadTests(unittest.TestCase):
             r'write[bwlq]|i2c_transfer|i2c_smbus_write\w*|'
             r'i2c_master_send)\b')
         self.assertEqual(self.source.count('regmap_read('), 1)
+
+    @unittest.skipUnless(BUILT.exists(), 'local build receipt is not present')
+    def test_built_module_imports_only_read_symbols(self):
+        imports = subprocess.run(['nm', '-u', str(BUILT)], capture_output=True,
+                                 text=True, check=True).stdout.split()[1::2]
+        self.assertEqual(sorted(imports), sorted(ALLOWED_IMPORTS))
 
     def test_preflight_and_makefile(self):
         self.assertIn('of_machine_is_compatible("apple,j72")', self.source)
