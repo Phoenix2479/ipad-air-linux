@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Check, upload and load one reviewed J72 probe module over USB serial.
 
-Each phase is explicit. `check` only reads device state. `upload` copies the
-loader and module to /tmp and verifies their device-side SHA-256. `load`
-makes the single finit_module call and only runs when `--load` is given.
+Each phase is explicit. `check` mounts debugfs if needed and only reads
+device state. `upload` copies the loader and module to /tmp and verifies their
+device-side SHA-256. `load` makes the single finit_module call and only runs
+when `--load` is given.
 """
 
 import argparse
@@ -45,7 +46,8 @@ PMU_COMMAND = (
 
 def pmu_problems(out, fields):
     problems = []
-    pmics = [line for line in out.splitlines() if line.startswith('PMIC=')]
+    pmics = [line for line in out.splitlines()
+             if re.fullmatch(r'PMIC=\S+ driver=\S+', line.strip())]
     if len(pmics) != 1 or not pmics[0].endswith('driver=simple-mfd-i2c'):
         problems.append('expected exactly one PMIC bound to simple-mfd-i2c')
     if fields.get('RTC', 'failed').strip() in ('', 'failed'):
@@ -146,13 +148,66 @@ def touch_snap_problems(out, fields):
     return problems
 
 
+TOUCH_POWER_COMMAND = (
+    f"printf 'PWM0_GENPD='; grep -E '^pwm0[[:space:]]' {GENPD} || echo missing; "
+    "printf 'PWM0_LISTED='; busybox awk '/^pwm0[[:space:]]/{p=1;next} !/^ /{p=0} "
+    f"p{{n++}} END{{print n+0}}' {GENPD}; "
+    f"printf 'SIO_P_GENPD='; grep -E '^sio_p[[:space:]]' {GENPD} || echo missing; "
+    f"printf 'GPIO_GENPD='; grep -E '^gpio[[:space:]]' {GENPD} || echo missing; "
+    "printf 'PWM_IOMEM='; grep -c -i '20a118' /proc/iomem; "
+    "printf 'POWER_DEV='; test -e /sys/bus/platform/devices/j72_touch_power "
+    "&& echo yes || echo no; "
+    "printf 'SPI_DEVICES=%s\\n' \"$(ls /sys/bus/spi/devices/ 2>/dev/null)\"; "
+    "printf 'PINMUX_UNCLAIMED='; grep -c -E '^pin (15|79|111|119) .*: UNCLAIMED$' "
+    "/sys/kernel/debug/pinctrl/20e300000.pinctrl/pinmux-pins 2>/dev/null; "
+    "printf 'GPIO_LINES='; grep -c -E '^ gpio-(15|79|111|119) ' "
+    "/sys/kernel/debug/gpio 2>/dev/null; " + PMU_COMMAND)
+
+TOUCH_POWER_EVIDENCE = (
+    f"echo EV_GENPD; cat {GENPD}; "
+    "echo EV_IOMEM; grep -i '20a1' /proc/iomem; "
+    "echo EV_GPIO; cat /sys/kernel/debug/gpio 2>/dev/null; "
+    "echo EV_PINMUX; grep -E '^pin (15|79|111|119) ' "
+    "/sys/kernel/debug/pinctrl/20e300000.pinctrl/pinmux-pins 2>/dev/null; "
+    "printf 'EV_RTC='; cat /sys/class/rtc/rtc0/time 2>/dev/null || echo failed; "
+    "printf 'EV_TAINT='; cat /proc/sys/kernel/tainted; "
+    "echo EV_DMESG; dmesg | grep -i -E "
+    "'j72_touch_power|pmgr|i2c.*(timeout|timed out|error|fail)|oops|SError' "
+    "| tail -n 40; true")
+
+
+def touch_power_problems(out, fields):
+    problems = pmu_problems(out, fields)
+    if not re.fullmatch(r'pwm0\s+off-\d+(\s.*)?', fields.get('PWM0_GENPD', '').strip()):
+        problems.append('genpd summary does not show pwm0 off')
+    if fields.get('PWM0_LISTED', '').strip() != '0':
+        problems.append('genpd lists a device or child under pwm0')
+    if not re.fullmatch(r'sio_p\s+on(\s.*)?', fields.get('SIO_P_GENPD', '').strip()):
+        problems.append('genpd summary does not show sio_p on')
+    if not re.fullmatch(r'gpio\s+on(\s.*)?', fields.get('GPIO_GENPD', '').strip()):
+        problems.append('genpd summary does not show gpio on')
+    if fields.get('PWM_IOMEM', '').strip() != '0':
+        problems.append('a region at 0x20a118xxx is already claimed')
+    if fields.get('POWER_DEV', '').strip() != 'no':
+        problems.append('platform device j72_touch_power already exists')
+    if fields.get('SPI_DEVICES', 'x').strip():
+        problems.append('an SPI device already exists')
+    if fields.get('PINMUX_UNCLAIMED', '').strip() != '4':
+        problems.append('pins 15/79/111/119 are not all unclaimed')
+    if fields.get('GPIO_LINES', '').strip() != '0':
+        problems.append('a GPIO line for pin 15/79/111/119 is already requested')
+    return problems
+
+
 MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
     'j72_touch_snap': (TOUCH_SNAP_COMMAND, touch_snap_problems),
+    'j72_touch_power': (TOUCH_POWER_COMMAND, touch_power_problems),
 }
 
-EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE}
+EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE,
+            'j72_touch_power': TOUCH_POWER_EVIDENCE}
 
 
 def check(shell, name):
@@ -160,6 +215,8 @@ def check(shell, name):
         return '', [f'no device checks are defined for {name}']
     command, module_problems = MODULE_CHECKS[name]
     out = shell.run(
+        "mount | grep -q ' /sys/kernel/debug ' || "
+        "mount -t debugfs none /sys/kernel/debug; "
         "printf 'KERNEL='; uname -r; printf 'COMPAT='; tr '\\000' ' ' "
         "< /proc/device-tree/compatible; echo; printf 'TAINT='; "
         "cat /proc/sys/kernel/tainted; printf 'LOADED='; "

@@ -23,6 +23,12 @@ TOUCH = ('PWM0_GENPD=pwm0                            off-0                      
          'SIO_P_GENPD=sio_p                           on                              0\n'
          'GPIO_GENPD=gpio                            on                              0\n'
          'PWM_IOMEM=0\nSNAP_DEV=no\n' + PMU)
+TOUCH_POWER = ('PWM0_GENPD=pwm0                            off-0                           0\n'
+               'PWM0_LISTED=0\n'
+               'SIO_P_GENPD=sio_p                           on                              0\n'
+               'GPIO_GENPD=gpio                            on                              0\n'
+               'PWM_IOMEM=0\nPOWER_DEV=no\nSPI_DEVICES=\n'
+               'PINMUX_UNCLAIMED=4\nGPIO_LINES=0\n' + PMU)
 
 
 class FakeShell:
@@ -46,8 +52,15 @@ class ProbeOnceCheckTests(unittest.TestCase):
     def test_clean_pmu_transcript_passes(self):
         problems, commands = check('j72_pmu_read', GENERIC + PMU)
         self.assertEqual(problems, [])
+        self.assertIn('mount -t debugfs none /sys/kernel/debug', commands[0])
         self.assertIn('test -e /sys/module/j72_pmu_read', commands[0])
         self.assertIn('busybox readlink $d/driver', commands[0])
+
+    def test_echoed_pmic_text_does_not_count_as_a_pmic_line(self):
+        transcript = (GENERIC + PMU +
+                      "PMIC=%s driver=%s\\n' \"${d##*/}\" \"${l##*/}\"\n")
+        problems, _ = check('j72_pmu_read', transcript)
+        self.assertEqual(problems, [])
 
     def test_pmu_failures_are_reported_in_order(self):
         transcript = (GENERIC.replace('LOADED=no', 'LOADED=yes') +
@@ -100,7 +113,8 @@ class ProbeOnceCheckTests(unittest.TestCase):
         transcript = GENERIC.replace('7.0.12-j72baseline', '7.0.12').replace(
             'apple,j72 ', 'apple,j71 ')
         for name, extra in (('j72_pmu_read', PMU), ('j72_spi_ctrl', SPI),
-                            ('j72_touch_snap', TOUCH)):
+                            ('j72_touch_snap', TOUCH),
+                            ('j72_touch_power', TOUCH_POWER)):
             with self.subTest(name=name):
                 problems, _ = check(name, transcript + extra)
                 self.assertEqual(problems, ['kernel release is not 7.0.12-j72baseline',
@@ -134,6 +148,62 @@ class ProbeOnceCheckTests(unittest.TestCase):
             with self.subTest(new=new):
                 problems, _ = check('j72_touch_snap', GENERIC + TOUCH.replace(old, new))
                 self.assertEqual(problems, [problem])
+
+    def test_clean_touch_power_transcript_passes(self):
+        problems, commands = check('j72_touch_power', GENERIC + TOUCH_POWER)
+        self.assertEqual(problems, [])
+        command = commands[0]
+        self.assertIn('test -e /sys/module/j72_touch_power', command)
+        self.assertIn('test -e /sys/bus/platform/devices/j72_touch_power', command)
+        self.assertIn('SPI_DEVICES=', command)
+        self.assertIn('PINMUX_UNCLAIMED=', command)
+        self.assertIn('GPIO_LINES=', command)
+        self.assertIn('busybox readlink $d/driver', command)
+        self.assertIn('${l##*/}', command)
+        self.assertNotIn('basename', command)
+
+    def test_touch_power_refuses_each_unsafe_state(self):
+        for old, new, problem in (
+                ('off-0', 'on', 'genpd summary does not show pwm0 off'),
+                (TOUCH_POWER.splitlines()[0], 'PWM0_GENPD=missing',
+                 'genpd summary does not show pwm0 off'),
+                ('PWM0_LISTED=0', 'PWM0_LISTED=1',
+                 'genpd lists a device or child under pwm0'),
+                ('sio_p                           on', 'sio_p                           off-0',
+                 'genpd summary does not show sio_p on'),
+                ('gpio                            on', 'gpio                            off-0',
+                 'genpd summary does not show gpio on'),
+                ('PWM_IOMEM=0', 'PWM_IOMEM=1',
+                 'a region at 0x20a118xxx is already claimed'),
+                ('POWER_DEV=no', 'POWER_DEV=yes',
+                 'platform device j72_touch_power already exists'),
+                ('POWER_DEV=no', 'POWER_DEV=',
+                 'platform device j72_touch_power already exists'),
+                ('SPI_DEVICES=', 'SPI_DEVICES=spi2.0',
+                 'an SPI device already exists'),
+                ('PINMUX_UNCLAIMED=4', 'PINMUX_UNCLAIMED=3',
+                 'pins 15/79/111/119 are not all unclaimed'),
+                ('PINMUX_UNCLAIMED=4', 'PINMUX_UNCLAIMED=',
+                 'pins 15/79/111/119 are not all unclaimed'),
+                ('GPIO_LINES=0', 'GPIO_LINES=1',
+                 'a GPIO line for pin 15/79/111/119 is already requested'),
+                ('driver=simple-mfd-i2c', 'driver=',
+                 'expected exactly one PMIC bound to simple-mfd-i2c')):
+            with self.subTest(new=new):
+                problems, _ = check('j72_touch_power',
+                                    GENERIC + TOUCH_POWER.replace(old, new))
+                self.assertEqual(problems, [problem])
+
+    def test_touch_power_evidence_covers_power_regions_pins_rtc_taint_and_errors(self):
+        evidence = probe_once.EVIDENCE['j72_touch_power']
+        for needle in ('cat /sys/kernel/debug/pm_genpd/pm_genpd_summary',
+                       "grep -i '20a1' /proc/iomem", '/sys/kernel/debug/gpio',
+                       "'^pin (15|79|111|119) '",
+                       '/sys/kernel/debug/pinctrl/20e300000.pinctrl/pinmux-pins',
+                       '/sys/class/rtc/rtc0/time', '/proc/sys/kernel/tainted',
+                       'j72_touch_power', 'pmgr', 'oops', 'SError'):
+            self.assertIn(needle, evidence)
+        self.assertNotIn('basename', evidence)
 
     def test_touch_snap_evidence_covers_power_regions_pins_rtc_and_taint(self):
         evidence = probe_once.EVIDENCE['j72_touch_snap']

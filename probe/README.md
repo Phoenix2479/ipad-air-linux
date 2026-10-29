@@ -106,3 +106,4 @@ enable/disable readback. Building the modules does not load them automatically.
 The [PMU read experiment](PMU.md) reads the D2089 touch rail registers without any write.
 The [SPI controller driver](SPI-CTRL.md) binds a PIO-only Samsung SPI v1 driver to the inspection node and leaves SPI2 idle.
 The [touch snapshot](TOUCH-SNAP.md) reads the touch pins, rails and PWM block, turning only ps_pwm0 on and then off.
+The [touch power Stage B](TOUCH-POWER.md) powers the rails and starts the 32 kHz clock while reset stays asserted, with no transfer.
