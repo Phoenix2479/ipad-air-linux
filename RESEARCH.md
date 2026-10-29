@@ -296,3 +296,70 @@ The J72 generic tree lists one touch calibration reference,
 `multi-touch-calibration = syscfg/MtCl/0x400`. That matches the 1,024 bytes
 recovered privately. Neither saved J72 tree JSON contains an `hbpp-version`
 property, so the HBPP length encoding for J72 is unknown.
+
+## 29 October iPad 5 N1 reference
+
+OrchardLinux/hardware pull request 6 carries the iPad 5 (J71t, A9) port from
+[brkosebay/omarchy-ipad5](https://github.com/brkosebay/omarchy-ipad5). That
+project reports working multitouch. Orchard lists the PR as unverified. The
+patches read here come from `brkosebay/hardware`
+`f764d95f70616adae483a97aaa7dae9f18cc8114`, `kernel/patches/j71t/0003`, `0004`
+and `0006`. Local copies are in `source/upstream/orchard-pr6/`. Orchard's
+`hardware` tree was read at `f3f14c91940e3d9ec83db6980abb2e8857fad439` and
+`cli` at `d6676044d5e1d7b1bd5a162b3e130ecf0578b832`. Nothing from these trees
+has been built or run.
+
+The iPad 5 uses touch profile `C1F15,1`, the same as J72. Orchard's converter
+test uses calibration address `0x10009000` and size `0x400`, matching J72. The
+driver class is N1, as on J72.
+
+### Same SPI controller family
+
+`spi-apple-s8000.c` drives the "Samsung SPI v1" controller with a 16-entry
+FIFO. Its register map matches the offsets found in the A7 iOS driver:
+
+| Offset | S8000 Linux name | A7 iOS observation |
+|---|---|---|
+| `0x00` | CTRL, enable `0x0d` | writes `0`, `0`, cached `0xd` |
+| `0x04` | CFG, base `0x4018`, PIO `BIT(5)` | ORs `0x20` and `0x40` into CFG |
+| `0x08` | STATUS, clear `0x40000f` | write and read |
+| `0x0c` | PIN, CS `BIT(1)` | write and read |
+| `0x10` / `0x20` | TX data / RX data | `0xff` write / read |
+| `0x30` | CLKDIV, maximum 2047 | DIV |
+| `0x34` / `0x4c` | RXCNT / TXCNT | writes |
+| `0x38` | WORD_DELAY, input-clock cycles | "IDLE" write |
+
+A PIO transfer writes CTRL `0`, then CLKDIV, WORD_DELAY, STATUS clear and CFG.
+Then come CTRL `0x0d`, both counts and CFG with PIO, then a STATUS poll loop.
+The driver never checks a CTRL readback of `0xd`. It requires CTRL `0` after
+stopping. The A10 driver in Orchard's `0012` patch also defines enable as
+RUN plus both FIFO resets, and its CTRL reads only flush posted writes. Both
+drivers support reading `0x1` after `0xd` as self-clearing reset bits.
+
+### Touch power order and J72 resources
+
+`apple_n1.c` starts with reset asserted and LDO off, then:
+
+1. Wait 5 ms, then enable the `vdd` analog regulator and the LDO.
+2. Wait 5 ms, then enable the 32,768 Hz touch clock.
+3. Wait 15 ms, then send the 2-byte wake word `0xc119`.
+4. Wait 10 ms, then select the display-sync pin state.
+5. Send a 16-byte HBPP NOP, release reset, and wait 15 ms.
+
+Power-off reverses this order.
+
+| `apple_n1` resource | J72 ADT function | J72 work needed |
+|---|---|---|
+| `vdd` regulator | `power_ana`, `pmuL` 525 | A7 PMU register mapping |
+| `ldo` (GPIO on J71t) | `power_ldo`, `pmuL` 529 | A7 PMU register mapping |
+| touch clock | `clock_enable`, `pwmC` channel 2 | PWM period/high-time mapping |
+| `reset` | GPIO 15 | none |
+| `attn` IRQ | GPIO 111 | none |
+| display sync | GPIO 119 | pin state |
+| chip select | GPIO 79 | none |
+
+The J71t clock is a PMGR TCLK register at `0x78000` that divides 24 MHz by 732.
+J72 instead uses PWM channel 2, so that clock driver does not apply. The J71t
+regulator maps `pmuL` `0x21f` to D2365 register `0x031c` bit 0. The A7 PMU
+mapping for 525 and 529 must come from the A7 iOS PMU driver. It must not be
+copied from D2365.
