@@ -22,6 +22,8 @@ import uuid
 PROJECT = Path(__file__).resolve().parents[1]
 STATE = PROJECT / '.host-session.json'
 LOGS = PROJECT / 'logs'
+# The original desktop kernel and the touch diagnostic baseline.
+RELEASES = ('7.0.12-gdfa4d4208131-dirty', '7.0.12-j72baseline')
 
 
 class SerialShell:
@@ -125,7 +127,8 @@ def start():
     shell = SerialShell(path)
     try:
         identity = shell.run('cat /proc/device-tree/model; uname -r')
-        if 'Apple iPad Air (Cellular)' not in identity or '7.0.12-gdfa4d4208131-dirty' not in identity:
+        if ('Apple iPad Air (Cellular)' not in identity or
+                not any(release in identity for release in RELEASES)):
             raise RuntimeError('The connected Linux system does not match this J72 bundle')
         interface, host, device, prefix = usb_address()
         shell.run(f'ip addr replace {device}/{prefix} dev usb0')

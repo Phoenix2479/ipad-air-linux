@@ -11,7 +11,10 @@ chroot_run() { busybox chroot "$root" "$@"; }
 
 check_device() {
     [ "$(cat /proc/device-tree/model)" = 'Apple iPad Air (Cellular)' ]
-    [ "$(uname -r)" = '7.0.12-gdfa4d4208131-dirty' ]
+    case "$(uname -r)" in
+        7.0.12-gdfa4d4208131-dirty | 7.0.12-j72baseline) ;;
+        *) return 1 ;;
+    esac
 }
 
 running() {
