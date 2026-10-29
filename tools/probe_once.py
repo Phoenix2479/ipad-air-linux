@@ -64,7 +64,25 @@ SPI_CTRL_COMMAND = (
     "printf 'SPI2_GENPD='; grep -E '^spi2[[:space:]]' "
     "/sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null || echo missing; "
     "printf 'CTRL_DRIVER='; test -e /sys/bus/platform/drivers/j72-spi-ctrl "
-    "&& echo yes || echo no")
+    "&& echo yes || echo no; "
+    "printf 'SPI_RPM=%s\\n' \"$(cat $d/power/runtime_status 2>/dev/null)\"; "
+    "printf 'SPI_ATTACHED='; grep -c '20a088000.spi-status' "
+    "/sys/kernel/debug/pm_genpd/pm_genpd_summary; "
+    "printf 'SPI_IOMEM='; grep -c -i '20a08' /proc/iomem; "
+    "printf 'SPI_MASTERS=%s\\n' \"$(ls /sys/class/spi_master/ 2>/dev/null)\"; "
+    "printf 'SPI_DEVICES=%s\\n' \"$(ls /sys/bus/spi/devices/ 2>/dev/null)\"")
+
+# Captured before and after the load so the two snapshots can be compared.
+SPI_CTRL_EVIDENCE = (
+    "d=/sys/bus/platform/devices/20a088000.spi-status; "
+    "l=$(busybox readlink $d/driver 2>/dev/null); echo \"EV_DRIVER=${l##*/}\"; "
+    "echo \"EV_RPM=$(cat $d/power/runtime_status 2>/dev/null)\"; "
+    "echo \"EV_MASTERS=$(ls /sys/class/spi_master/ 2>/dev/null)\"; "
+    "for m in /sys/class/spi_master/*; do test -e $m || continue; "
+    "o=$(busybox readlink $m/of_node); echo \"EV_OF_NODE=${m##*/} ${o##*/}\"; done; "
+    "echo \"EV_SPI_DEVICES=$(ls /sys/bus/spi/devices/ 2>/dev/null)\"; "
+    "echo EV_IOMEM; grep -i '20a08' /proc/iomem; "
+    "echo EV_GENPD; cat /sys/kernel/debug/pm_genpd/pm_genpd_summary; true")
 
 
 def spi_ctrl_problems(out, fields):
@@ -77,6 +95,14 @@ def spi_ctrl_problems(out, fields):
         problems.append('genpd summary does not show spi2 off')
     if fields.get('CTRL_DRIVER', '').strip() != 'no':
         problems.append('j72-spi-ctrl driver is already registered')
+    if fields.get('SPI_RPM', '').strip() != 'unsupported':
+        problems.append('20a088000.spi-status runtime PM is not "unsupported"')
+    if fields.get('SPI_ATTACHED', '').strip() != '0':
+        problems.append('20a088000.spi-status is still attached to a genpd')
+    if fields.get('SPI_IOMEM', '').strip() != '0':
+        problems.append('a region at 0x20a08xxxx is already claimed')
+    if fields.get('SPI_MASTERS', 'x').strip() or fields.get('SPI_DEVICES', 'x').strip():
+        problems.append('an SPI controller or device already exists')
     return problems
 
 
@@ -84,6 +110,8 @@ MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
 }
+
+EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE}
 
 
 def check(shell, name):
@@ -154,12 +182,20 @@ def main():
         if not args.load:
             print('checks and uploads passed; rerun with --load for the single call')
             return
+        evidence = EVIDENCE.get(name)
+        if evidence:
+            log.write('BEFORE\n' + shell.run(evidence) + '\n')
+        pattern = name.replace('_', '[-_]')
         out = shell.run(f'/tmp/j72-load-once /tmp/{name}.ko; printf "\\nLOADER_RC=%s\\n" "$?"; '
-                        f'dmesg | grep {name}; printf "TAINT="; '
-                        'cat /proc/sys/kernel/tainted; echo FULL_DMESG; dmesg',
+                        f"dmesg | grep -E '{pattern}|spi-status|spi_master|power-controller@200a8'; "
+                        'printf "TAINT="; cat /proc/sys/kernel/tainted; echo FULL_DMESG; dmesg',
                         timeout=60)
         log.write('LOAD\n' + out + '\n')
         print(out)
+        if evidence:
+            after = shell.run(evidence)
+            log.write('AFTER\n' + after + '\n')
+            print(after)
     finally:
         log.close()
         shell.close()

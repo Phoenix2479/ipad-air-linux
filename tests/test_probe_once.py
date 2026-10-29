@@ -16,7 +16,8 @@ PMU = ('PMIC=0-003c driver=simple-mfd-i2c\nRTC=10:21:07\nI2C_OPEN=0\n'
        'I2C_DMESG\n[    1.2] i2c 0-003c: registered\n')
 SPI = ('SPI_DEV=yes\nSPI_DRIVER=\n'
        'SPI2_GENPD=spi2                            off-0                           0\n'
-       'CTRL_DRIVER=no\n')
+       'CTRL_DRIVER=no\nSPI_RPM=unsupported\nSPI_ATTACHED=0\nSPI_IOMEM=0\n'
+       'SPI_MASTERS=\nSPI_DEVICES=\n')
 
 
 class FakeShell:
@@ -75,7 +76,17 @@ class ProbeOnceCheckTests(unittest.TestCase):
                 (SPI.splitlines()[2], 'SPI2_GENPD=missing',
                  'genpd summary does not show spi2 off'),
                 ('CTRL_DRIVER=no', 'CTRL_DRIVER=yes',
-                 'j72-spi-ctrl driver is already registered')):
+                 'j72-spi-ctrl driver is already registered'),
+                ('SPI_RPM=unsupported', 'SPI_RPM=active',
+                 '20a088000.spi-status runtime PM is not "unsupported"'),
+                ('SPI_ATTACHED=0', 'SPI_ATTACHED=1',
+                 '20a088000.spi-status is still attached to a genpd'),
+                ('SPI_IOMEM=0', 'SPI_IOMEM=1',
+                 'a region at 0x20a08xxxx is already claimed'),
+                ('SPI_MASTERS=\n', 'SPI_MASTERS=spi0\n',
+                 'an SPI controller or device already exists'),
+                ('SPI_DEVICES=\n', 'SPI_DEVICES=spi0.0\n',
+                 'an SPI controller or device already exists')):
             with self.subTest(new=new):
                 problems, _ = check('j72_spi_ctrl', GENERIC + SPI.replace(old, new))
                 self.assertEqual(problems, [problem])
