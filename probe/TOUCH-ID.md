@@ -88,6 +88,47 @@ j72_touch_id: final version=0x........ complete=1 pmgr_before=... cleanup=0
 for any other value, so the version decides a later Stage C2 setting. Any
 value other than zero or all ones is a pass for C1.
 
+## Device run
+
+Run 1 (`logs/probe-j72-touch-id-20261029.log`, module `a5a0932b...`) passed
+on 29 October. It ran on the same boot as the Stage B run 3, after loading
+`j72_spi_ctrl` (`9169c3c3...`), with pin 79 in the rerun state `0x00072202`.
+
+```text
+wake tx=19 c1 rx=00 00 ret=0 hz=12000000
+boot_nop tx=1a a1 18 e1 ... rx=00 (all 16 bytes) ret=0
+gpio15 reset raw=0x00072603 mode=1 data=1
+atn phase=reset_released value=0
+hbpp tx=1a a1 18 e1 ... rx=1f 01 48 79 48 79 48 79 48 79 48 79 48 79 48 79 ret=0
+register_request tx=1c 73 8f fc 10 00 01 9b rx=48 79 48 79 48 79 48 79 ret=0
+register_result tx=1a a1 18 e1 18 e1 18 e1 rx=4c 39 15 c1 43 4d 01 66 ret=0
+HBPP detected; N1 controller 0x434d15c1
+atn phase=identified value=1
+stage C1 complete; no firmware loaded
+final version=0x434d15c1 complete=1 pmgr_before=0x00000200 pmgr_on=0x000002ff
+      pmgr_after=0x00000200 gpio15=0x00072602 gpio79=0x00072202 gpio119=0x00072602 cleanup=0
+```
+
+The loader returned 0. Afterwards pwm0 was off, all four pins were
+unclaimed, there was no SPI device and no `20a118` region, and there was no
+oops or SError; taint was 4096.
+
+What this shows:
+
+- SPI2, the ported controller, the 12 MHz setting and pin 79 as an
+  active-low chip select all work. Before reset was released the N1 returned
+  only zeros, and right after it returned HBPP words.
+- The N1 boot ROM answers HBPP without display sync, so leaving pin 119 low
+  is fine for identity. Firmware execution may still need it.
+- ATN went low when reset was released and high again after the version
+  read.
+- The controller version is `0x434d15c1`. `apple_n1` selects const-cal 3
+  for any version other than `0x434d11a0`, so Stage C2 uses const-cal 3.
+- The PWM block read `0x10 = 0x16e`, `0x14 = 0x16e` and `0x20 = 0x4000`
+  before this run's writes. Those are the values the Stage B run left, so the
+  channel registers keep their contents while ps_pwm0 is off. The all-zero
+  block in the earlier runs was the state iBoot leaves.
+
 ## Build and test
 
 Copy `j72_touch_power.c`, `j72_touch_id.c` and the Makefile to the builder
