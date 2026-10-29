@@ -115,4 +115,24 @@ allowlist has no write, GPIO, pinctrl, IRQ or SPI symbol.
 
 ## Recorded result
 
-Not yet run.
+On 29 October the module loaded once on the live diagnostic boot. The
+runner's preflight passed, after it was changed to use the BusyBox `awk`
+applet. The loader returned 0 and the module logged:
+
+```text
+gpio15=0x00072602 gpio79=0x00072203 gpio111=0x00070381 gpio119=0x00072602 pmgr[0x20070]=0x00000200 ldo14_en[0x0084]=0x00 ldo18_en[0x0085]=0x11 ldo14_vset[0x0398]=0x14
+gpio15 reset mode=1 data=0 periph=0 input_enable=1 lock=0
+gpio79 enable_cs mode=1 data=1 periph=0 input_enable=1 lock=0
+gpio111 atn mode=0 data=1 periph=0 input_enable=1 lock=0
+gpio119 sync mode=1 data=0 periph=0 input_enable=1 lock=0
+pmgr_on=0x000002ff pwm[0x00..0x20]=00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+cleanup=0 pmgr_on=0x000002ff pmgr_after=0x00000200
+```
+
+iBoot holds the touch reset low and display sync low. It leaves `enable_cs`
+(GPIO 79) driven high with the touch rails off, so Stage B must drive it low
+first. ATN reads high with the rails off. The PWM block was reachable with
+`ps_pwm0` on, and every register read zero. The domain went `0x200`,
+`0x2ff`, `0x200`, then back to `off-0` with no device. Taint stayed 4096,
+the RTC still read, and the kernel logged no oops, SError or PMGR error.
+The structured result is in `.omx/work/j72-touch-snap-20261029/result.json`.

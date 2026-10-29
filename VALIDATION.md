@@ -267,3 +267,14 @@ idle writes completed, and CTRL read back 0 after inherited `0/8/0`. It
 registered `spi0` with no devices. Only the `spi2` power domain turned on. No
 transfer, touch power, PWM or GPIO operation occurred. Details are in
 [probe/SPI-CTRL.md](probe/SPI-CTRL.md).
+
+## 29 October touch pin and PWM snapshot
+
+The read-only Stage B0 module `j72_touch_snap` passed independent review. It
+then ran once on the live boot. It read the touch pins, PMGR, the PMIC and
+every PWM register, with `ps_pwm0` powered only briefly. The first PWM
+access caused no fault, and all channel registers read zero. iBoot leaves
+reset (GPIO 15) and display sync (GPIO 119) low. It leaves `enable_cs`
+(GPIO 79) high and ATN (GPIO 111) high, with the touch rails off. No pin,
+PMIC or PWM register was written. Details are in
+[probe/TOUCH-SNAP.md](probe/TOUCH-SNAP.md).
