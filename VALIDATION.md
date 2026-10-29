@@ -258,3 +258,12 @@ reads `0x14`. Loader exit 0, taint 0 to 4096, RTC reads before and after, no
 oops, panic or I2C error, responsive shell. No PMIC, SPI, PWM, GPIO or touch
 write occurred. A touch driver must enable both rails itself. Details are in
 [probe/PMU.md](probe/PMU.md).
+
+## 29 October SPI2 controller binding
+
+The ported Samsung SPI v1 PIO driver `j72_spi_ctrl` passed independent review.
+It bound to the existing `20a088000.spi-status` node on the same live boot. Its
+idle writes completed, and CTRL read back 0 after inherited `0/8/0`. It
+registered `spi0` with no devices. Only the `spi2` power domain turned on. No
+transfer, touch power, PWM or GPIO operation occurred. Details are in
+[probe/SPI-CTRL.md](probe/SPI-CTRL.md).

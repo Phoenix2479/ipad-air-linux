@@ -89,4 +89,22 @@ functions against MMIO stubs.
 
 ## Recorded result
 
-Not yet run.
+On 29 October the module loaded once on the live diagnostic boot, about 33
+minutes after the PMU snapshot. The preflight showed the node unbound,
+unattached and unclaimed, `spi2` `off-0` and `sio_p` on. debugfs was mounted
+by hand for the genpd summary. The device-side hashes matched loader
+`42d8b563...` and module `9169c3c3...`. The loader returned 0 and the kernel
+logged:
+
+```text
+j72-spi-ctrl 20a088000.spi-status: SPI inherited ctrl=0x0 cfg=0x8 status=0x0
+j72-spi-ctrl 20a088000.spi-status: Samsung SPI v1 PIO idle, input 60000000 Hz (reported), bus 0
+```
+
+Afterwards the driver was bound with runtime PM `active`. `spi0` used
+`spi-status@20a088000` as its node, and no SPI device existed. The region
+`20a088000-20a08bfff` was claimed. Only `spi2` changed in the genpd summary,
+from `off-0` to `on`. Taint stayed 4096, the RTC still read, and no new
+warning appeared. No transfer occurred, so SPI signalling and the physical
+clock remain unverified. The structured result is in
+`.omx/work/j72-spi-ctrl-20261029/result.json`.
