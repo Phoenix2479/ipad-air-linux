@@ -29,7 +29,8 @@ def sha256(path):
 
 def device_sha(shell, remote):
     out = shell.run(f'busybox sha256sum {remote} 2>/dev/null || true')
-    return out.split()[-2] if len(out.split()) >= 2 else ''
+    match = re.search(r'\b([0-9a-f]{64})\s+' + re.escape(remote) + r'\s*$', out, re.M)
+    return match.group(1) if match else ''
 
 
 def check(shell, name):
@@ -40,8 +41,8 @@ def check(shell, name):
         f"test -e /sys/module/{name} && echo yes || echo no; "
         "for d in /sys/bus/i2c/devices/*; do "
         "  c=$(tr '\\000' ' ' < $d/of_node/compatible 2>/dev/null); "
-        "  case \"$c\" in *apple,i2c-pmic*) printf 'PMIC=%s driver=%s\\n' "
-        "    \"$(basename $d)\" \"$(basename $(readlink $d/driver) 2>/dev/null)\";; esac; "
+        "  case \"$c\" in *apple,i2c-pmic*) l=$(busybox readlink $d/driver); "
+        "    printf 'PMIC=%s driver=%s\\n' \"${d##*/}\" \"${l##*/}\";; esac; "
         "done; printf 'RTC='; cat /sys/class/rtc/rtc0/time 2>/dev/null || echo failed; "
         "printf 'I2C_OPEN='; ls -l /proc/[0-9]*/fd 2>/dev/null | grep -c /dev/i2c-; "
         "echo I2C_DMESG; dmesg | grep -i -E 'i2c|pmic' | tail -n 20")

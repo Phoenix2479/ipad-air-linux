@@ -246,3 +246,15 @@ result, A7 instruction evidence, newer-driver reference and review reports are
 in `.omx/work/j72-spi-enable-20261028/`. See [probe/ENABLE.md](probe/ENABLE.md).
 The next gate is interpretation of the A7 control bits before any revised
 acceptance check or further hardware action.
+
+## 29 October touch rail register snapshot
+
+The diagnostic kernel booted again from the checked status payload. The
+read-only `j72_pmu_read` module passed independent review and its runner's
+preflight. It made three single-byte reads of the D2089 PMIC through the
+existing `simple-mfd-i2c` regmap. Registers `0x84 = 0x00` and `0x85 = 0x11`
+show both touch rails, ldo14 and ldo18, disabled after boot. Register `0x398`
+reads `0x14`. Loader exit 0, taint 0 to 4096, RTC reads before and after, no
+oops, panic or I2C error, responsive shell. No PMIC, SPI, PWM, GPIO or touch
+write occurred. A touch driver must enable both rails itself. Details are in
+[probe/PMU.md](probe/PMU.md).

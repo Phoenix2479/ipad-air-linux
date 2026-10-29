@@ -58,4 +58,21 @@ transfer symbol is allowed.
 
 ## Recorded result
 
-Not yet run on hardware.
+On 29 October the diagnostic kernel booted from payload `12657342...`. The
+runner's preflight passed with taint 0, one PMIC `0-003c` bound to
+`simple-mfd-i2c`, a readable RTC and no open I2C device. The device-side hashes
+matched loader `42d8b563...` and module `fbd12453...`. The single load returned
+0 and logged:
+
+```text
+ldo14_en[0x0084]=0x00 ldo18_en[0x0085]=0x11 ldo14_vset[0x0398]=0x14
+ldo14_en=0 shared=0x0 ldo18_en=0 ldo14_field=0x14 ldo14_mV_inferred=6000
+```
+
+Both touch rail enable bits are clear after Linux boots, and so are the shared
+`0x84` bits. Register `0x85` has bits `0x01` and `0x10` set, which the iOS
+table assigns to ldo17 and ldo20. The ldo14 voltage field is `0x14`; its unit
+is unresolved. Afterwards taint was 4096, the RTC still read, the shell
+responded and the kernel log had no oops, panic or I2C error. No register was
+written. The structured result is in
+`.omx/work/j72-pmu-read-20261029/result.json`.
