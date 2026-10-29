@@ -388,7 +388,10 @@ voltage field. The iPad 5 uses the same options byte in `pmuL` `0x21f`.
 
 The Linux DTB already describes this PMIC as `pmic@3c` on I2C, with
 `apple,anya-pmic` and `apple,i2c-pmic`. A touch regulator can therefore use
-the parent register map, as Orchard's touch-supply regulator does. The
-ldo14 output voltage, the meaning of bits 0 and 1, the register width and
-the cached flag remain unverified. No PMU register was read or written.
+the parent register map, as Orchard's touch-supply regulator does. Hoolock's `simple-mfd-i2c` match for `apple,i2c-pmic` (commit `6fbefd3035`)
+uses 16-bit register addresses and 8-bit values, which matches the iOS
+accesses. Registers `0x84`, `0x85` and `0x398` may be readable through
+regmap debugfs without a new module, if the kernel enables it. The ldo14
+output voltage, the meaning of bits 0 and 1, and the cached flag remain
+unverified. No PMU register was read or written.
 Evidence is in `.omx/work/j72-pmu-rails-20261029/result.json`.
