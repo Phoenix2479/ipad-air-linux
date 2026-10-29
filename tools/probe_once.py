@@ -106,12 +106,53 @@ def spi_ctrl_problems(out, fields):
     return problems
 
 
+GENPD = '/sys/kernel/debug/pm_genpd/pm_genpd_summary'
+
+# Under a domain line, genpd indents its attached devices and its children.
+TOUCH_SNAP_COMMAND = (
+    f"printf 'PWM0_GENPD='; grep -E '^pwm0[[:space:]]' {GENPD} || echo missing; "
+    "printf 'PWM0_LISTED='; awk '/^pwm0[[:space:]]/{p=1;next} !/^ /{p=0} "
+    f"p{{n++}} END{{print n+0}}' {GENPD}; "
+    f"printf 'SIO_P_GENPD='; grep -E '^sio_p[[:space:]]' {GENPD} || echo missing; "
+    f"printf 'GPIO_GENPD='; grep -E '^gpio[[:space:]]' {GENPD} || echo missing; "
+    "printf 'PWM_IOMEM='; grep -c -i '20a118' /proc/iomem; "
+    "printf 'SNAP_DEV='; test -e /sys/bus/platform/devices/j72_touch_snap "
+    "&& echo yes || echo no; " + PMU_COMMAND)
+
+TOUCH_SNAP_EVIDENCE = (
+    f"echo EV_GENPD; cat {GENPD}; "
+    "echo EV_IOMEM; grep -i '20a1' /proc/iomem; "
+    "echo EV_GPIO; cat /sys/kernel/debug/gpio 2>/dev/null; "
+    "echo EV_PINMUX; grep -E '^pin (15|79|111|119) ' "
+    "/sys/kernel/debug/pinctrl/20e300000.pinctrl/pinmux-pins 2>/dev/null; "
+    "printf 'EV_RTC='; cat /sys/class/rtc/rtc0/time 2>/dev/null || echo failed; "
+    "printf 'EV_TAINT='; cat /proc/sys/kernel/tainted; true")
+
+
+def touch_snap_problems(out, fields):
+    problems = pmu_problems(out, fields)
+    if not re.fullmatch(r'pwm0\s+off-\d+(\s.*)?', fields.get('PWM0_GENPD', '').strip()):
+        problems.append('genpd summary does not show pwm0 off')
+    if fields.get('PWM0_LISTED', '').strip() != '0':
+        problems.append('genpd lists a device or child under pwm0')
+    if not re.fullmatch(r'sio_p\s+on(\s.*)?', fields.get('SIO_P_GENPD', '').strip()):
+        problems.append('genpd summary does not show sio_p on')
+    if not re.fullmatch(r'gpio\s+on(\s.*)?', fields.get('GPIO_GENPD', '').strip()):
+        problems.append('genpd summary does not show gpio on')
+    if fields.get('PWM_IOMEM', '').strip() != '0':
+        problems.append('a region at 0x20a118xxx is already claimed')
+    if fields.get('SNAP_DEV', '').strip() != 'no':
+        problems.append('platform device j72_touch_snap already exists')
+    return problems
+
+
 MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
+    'j72_touch_snap': (TOUCH_SNAP_COMMAND, touch_snap_problems),
 }
 
-EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE}
+EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE}
 
 
 def check(shell, name):
