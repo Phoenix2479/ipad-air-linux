@@ -10,6 +10,7 @@ import argparse
 import base64
 import hashlib
 from pathlib import Path
+import re
 import sys
 import time
 
@@ -41,7 +42,9 @@ def check(shell, name):
         "  c=$(tr '\\000' ' ' < $d/of_node/compatible 2>/dev/null); "
         "  case \"$c\" in *apple,i2c-pmic*) printf 'PMIC=%s driver=%s\\n' "
         "    \"$(basename $d)\" \"$(basename $(readlink $d/driver) 2>/dev/null)\";; esac; "
-        "done")
+        "done; printf 'RTC='; cat /sys/class/rtc/rtc0/time 2>/dev/null || echo failed; "
+        "printf 'I2C_OPEN='; ls -l /proc/[0-9]*/fd 2>/dev/null | grep -c /dev/i2c-; "
+        "echo I2C_DMESG; dmesg | grep -i -E 'i2c|pmic' | tail -n 20")
     print(out)
     fields = dict(line.split('=', 1) for line in out.splitlines() if '=' in line
                   and not line.startswith('PMIC='))
@@ -52,8 +55,15 @@ def check(shell, name):
         problems.append('board is not apple,j72')
     if fields.get('LOADED', '').strip() != 'no':
         problems.append(f'{name} is already loaded')
-    if 'driver=simple-mfd-i2c' not in out:
-        problems.append('PMIC is not bound to simple-mfd-i2c')
+    pmics = [line for line in out.splitlines() if line.startswith('PMIC=')]
+    if len(pmics) != 1 or not pmics[0].endswith('driver=simple-mfd-i2c'):
+        problems.append('expected exactly one PMIC bound to simple-mfd-i2c')
+    if fields.get('RTC', 'failed').strip() in ('', 'failed'):
+        problems.append('PMIC RTC read failed')
+    if fields.get('I2C_OPEN', '').strip() != '0':
+        problems.append('a process has /dev/i2c-* open')
+    if re.search(r'(?i)i2c.*(timeout|timed out|error|fail)', out.split('I2C_DMESG', 1)[-1]):
+        problems.append('kernel log reports I2C errors')
     return out, problems
 
 
@@ -105,7 +115,8 @@ def main():
             return
         out = shell.run(f'/tmp/j72-load-once /tmp/{name}.ko; printf "\\nLOADER_RC=%s\\n" "$?"; '
                         f'dmesg | grep {name}; printf "TAINT="; '
-                        'cat /proc/sys/kernel/tainted', timeout=60)
+                        'cat /proc/sys/kernel/tainted; echo FULL_DMESG; dmesg',
+                        timeout=60)
         log.write('LOAD\n' + out + '\n')
         print(out)
     finally:
