@@ -66,6 +66,47 @@ clean upload and execute, add display sync before suspecting anything else.
 the surface and marks whether it matches, but does not refuse, because the
 J72 panel geometry is not yet confirmed. It still refuses inverted edges.
 
+## Device run
+
+Run 1 (`logs/probe-j72-touch-fw-20261029.log`, module `8b73551a...`) passed
+on 29 October, on the same boot as Stage B run 3 and C1 run 1. The loader
+returned 0.
+
+- All four uploads (prox, two MtCl packets, firmware) got `4bc1` on the first
+  attempt. The 57,016-byte transfer worked, so the controller's FIFO refill
+  and its count registers handle transfers up to at least `0xdeb8` bytes.
+- All five calibration register writes got `4ad1`. `SPI_APU_EN` read 0 and
+  the calibration request returned `0x4969`.
+- After execute, the firmware answered E2 with interface 1 and max packet
+  2454, and every report on the first attempt:
+
+```text
+report d1 length=1 data=15
+report d3 length=12 data=01 28 1e 02 10 00 28 1e 96 09 00 00
+report d0 length=8 data=01 01 00 28 01 00 1e 00
+report a1 length=6 data=00 00 05 00 00 02
+report d9 length=16 data=99 39 00 00 c9 4c 00 00 90 ff 90 ff ac 38 e2 4b
+N1 ready: max packet 2454, family 21, sensor 40x30, FW 0x0210,
+          surface 14745x19657 (J71t), x=-112..14508 y=-112..19426
+stage C2 complete; descriptors read, no input device
+final version=0x434d15c1 complete=1 pmgr_after=0x00000200 gpio15=0x00072602
+      gpio79=0x00072202 gpio119=0x00072602 cleanup=0
+```
+
+Afterwards pwm0 was off, all four pins were unclaimed, there was no SPI
+device, and there was no oops, SError or PIO error; taint was 4096.
+
+What this shows:
+
+- The J72 surface is 14745x19657, the same as the J71t, so `apple_n1`'s D9
+  identity check holds on this unit. The edges are x -112..14508 and y
+  -112..19426.
+- The sensor is 40x30 and the firmware reports version 0x0210.
+- The firmware boots and answers without display sync. Whether contact
+  scanning needs it is still open for Stage D.
+- D3 is 12 bytes here, longer than the 5 bytes `apple_n1` uses, so it went
+  through E7. `apple_n1` accepts longer descriptors.
+
 ## Build and test
 
 Build `j72_touch_power.c`, `j72_touch_id.c` and `j72_touch_fw.c` together.
