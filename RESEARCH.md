@@ -309,6 +309,12 @@ and `0006`. Local copies are in `source/upstream/orchard-pr6/`. Orchard's
 `cli` at `d6676044d5e1d7b1bd5a162b3e130ecf0578b832`. Nothing from these trees
 has been built or run.
 
+These references target Linux 7.3-rc1. Hoolock `6831bc701a` reports 7.3-rc1,
+Orchard's base is v7.3-rc1, and the PR's patches apply to `6831bc701a`. The
+J72 baseline is 7.0.12 at `dfa4d420`. Each reused driver must be ported to
+7.0.12, and its single-load test must be rerun on that kernel. Moving the
+whole build to 7.3-rc1 would require validating the boot and desktop again.
+
 The iPad 5 uses touch profile `C1F15,1`, the same as J72. Orchard's converter
 test uses calibration address `0x10009000` and size `0x400`, matching J72. The
 driver class is N1, as on J72.
