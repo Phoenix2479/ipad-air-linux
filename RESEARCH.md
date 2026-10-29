@@ -363,3 +363,32 @@ J72 instead uses PWM channel 2, so that clock driver does not apply. The J71t
 regulator maps `pmuL` `0x21f` to D2365 register `0x031c` bit 0. The A7 PMU
 mapping for 525 and 529 must come from the A7 iOS PMU driver. It must not be
 copied from D2365.
+
+### D2089 touch power rails
+
+The J72 PMU is a Dialog D2089 (`pmu,d2089`). In iOS, its `pmuL` functions are
+`AppleD2089PMULDOFunction` objects. The token compare is at
+`0xfffffff008686b60`. The 32-bit argument packs the LDO index in byte 0 and
+options in byte 1, with a voltage in the upper half. Options bit 1 selects
+on/off control without a voltage change. `AppleD2089PMU::_setLDO` at
+`0xfffffff008689838` indexes a 22-entry, 12-byte table at
+`0xfffffff00715b8a8`. It performs a one-byte read-modify-write on the
+entry's enable register.
+
+| ADT function | Argument | LDO | Enable register | Mask |
+|---|---|---|---|---|
+| `power_ana` | 525 = `0x020d` | index `0x0d`, ldo14 | `0x0084` | `0x04` |
+| `power_ldo` | 529 = `0x0211` | index `0x11`, ldo18 | `0x0085` | `0x02` |
+
+Ldo14 shares voltage register `0x0398` with ldo15 and ldo16. That register is
+5,000 mV plus 50 mV steps, and these touch arguments do not write it. For
+indexes `0x0d` to `0x0f`, iOS sets register `0x84` bits `0x03` whenever any
+of bits `0x1c` is set, and clears them otherwise. Ldo18 is a switch with no
+voltage field. The iPad 5 uses the same options byte in `pmuL` `0x21f`.
+
+The Linux DTB already describes this PMIC as `pmic@3c` on I2C, with
+`apple,anya-pmic` and `apple,i2c-pmic`. A touch regulator can therefore use
+the parent register map, as Orchard's touch-supply regulator does. The
+ldo14 output voltage, the meaning of bits 0 and 1, the register width and
+the cached flag remain unverified. No PMU register was read or written.
+Evidence is in `.omx/work/j72-pmu-rails-20261029/result.json`.
