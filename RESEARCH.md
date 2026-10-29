@@ -401,3 +401,15 @@ regmap debugfs without a new module, if the kernel enables it. The ldo14
 output voltage, the meaning of bits 0 and 1, and the cached flag remain
 unverified. No PMU register was read or written.
 Evidence is in `.omx/work/j72-pmu-rails-20261029/result.json`.
+
+### iPad 7 bring-up method
+
+[Pauli1Go/HoolockLinux-bringup-docs `docs/touch.md`](https://github.com/Pauli1Go/HoolockLinux-bringup-docs/blob/main/docs/touch.md)
+explains how J172 touch was brought up. That work compared the ADT, firmware
+records and iOS SPI, transport and multitouch drivers. It used passive iOS RAM
+captures that added no SPI transactions, and passive PMGR and PLL reads. Each
+fresh-boot test stopped at the first failed step. The measured J172 SPI input
+clock was 55,384,615 Hz, derived from PLL state instead of a bootloader value.
+J72's 60 MHz `nclk` therefore still needs a register-level check before
+transfers. J172 required SmartIO DMA for its firmware upload. The iPad 5 S8000
+driver uses bounded PIO only, so a first A7 port may not need DMA.
