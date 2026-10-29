@@ -108,6 +108,74 @@ the iPad 5 is the 32 kHz clock: the iPad 5 uses a PMGR TCLK register, J72
 uses PWM channel 2 (`grape-clk`), and no pad for that output is named in the
 ADT, so whether the clock reaches the N1 is unconfirmed.
 
+5. Both builds were stopped for the night. `j72_touch_d2` stop returned
+   `cleanup=0`, pin 111 `0x0000038f`, all four pins unclaimed and no IRQ.
+
+## What iOS does after discovery
+
+A static read of the 16G77 kernelcache (29 October; addresses are kernel
+virtual addresses, notes in `.omx/work/j72-touch-silent-20261029/`) found:
+
+- **No pad setup for the touch clock.** `AppleS5L8920XPWM` (code at
+  `0xfffffff007ddfac8`) only touches its own registers and turns on clock
+  gate 69. `grape-clk` setup (`0x7d57510`) looks for an optional
+  `function-enable` property that J72 does not have, and `pwmC`
+  (`0x7d57d34`) only starts channel 2 at 32,768 Hz, 50% duty. So the pad that
+  carries channel 2 is either hard-wired or set by iBoot, which is encrypted
+  here.
+- **No start command.** After execute, iOS marks the firmware present, waits
+  2 ms, caches device properties with GET requests only, runs DefaultReports
+  (`0x7e8b5d8`), which has nothing to send because neither the C1,J72
+  personality nor `J72.mtprops` lists any, and reports ready. The interrupt is
+  enabled before the boot, and frames are read only when ATN fires.
+- **Display sync matches.** Power-on passes mode 3, which becomes pin mode 2:
+  `cfg & ~0x260 | 0x220` (`0x858db2c`), peripheral function 1 plus input
+  enable, set once before the boot NOP. That is what `j72_touch_d2` does
+  (`0x00072623` read back).
+- **Calibration registers match** `apple_n1` (`0x7e9be60`-`0x7e9bf10`).
+  6089 x 32,768 Hz is about 199.5 MHz, so the N1's frequency-locked loop
+  appears to use the 32 kHz input as its reference. That reading is an
+  inference: with no reference clock the loop would not lock, and scanning
+  could stall while SPI still works, which fits what we see.
+- iOS sets ATN to falling edge. This driver uses level-low, which cannot be
+  the cause: the raw ATN level never dropped during touches.
+
+Not determined: which pad carries PWM channel 2, whether iBoot sets it, and
+whether iOS userspace (MultitouchSupport) sends set-reports through the user
+client (`0x7e9173c`). The 16G77 root filesystem image on the Mac could answer
+the last one.
+
+## Next session
+
+The iPad was left on the Stage B boot (`7.0.12-j72baseline`, up about 1.6 h
+at stop) with `j72_spi_ctrl` bound and every touch module stopped: rails off,
+clock stopped, pins 15/79/119 low, 111 at `0x0000038f`, nothing claimed. The
+runner and preflight accept a new build on this boot. The Mac keep-awake runs
+until 31 October 14:09 UTC.
+
+1. **Check the iPad first.** Over serial, read `uname -r`, uptime and the
+   pinmux-pins lines for 15/79/111/119. If it rebooted, boot the diagnostic
+   kernel ([README](README.md)) and load `j72_spi_ctrl` before anything else.
+2. **Dump every pin's config word (read-only).** Add a one-shot module that
+   reads the 200 words at `0x20e300000 + 4*pin` through a read-only mapping
+   under the pinctrl device lock, as `read_pins()` does, and logs each raw
+   word with its decoded mode, data, periph, pull and group. Pins with a
+   non-zero periph field that no Linux device owns are the candidates for the
+   PWM channel 2 pad. Known owners so far: 80/81 (i2c0, periph1), and SPI2's
+   clock, MOSI and MISO, which must also be in a periph mode for C1/C2 to
+   have worked.
+3. **Run the dump twice if useful:** once idle, and once while a touch build
+   has PWM channel 2 running, in case iBoot's pad setting depends on it.
+4. **Check other A7 sources** for the grape-clk or touch-clock pad:
+   Project Cascadia's notes, iPad mini 2/3 (J85/J86/J87, same A7) device
+   trees, and m1n1's s5l8960x pin tables.
+5. **If a candidate pad is found,** add it to the touch driver as a second
+   runtime mapping (like display sync), drive it only while the rails and
+   clock are up, restore it in teardown, and load the result as
+   `j72_touch_d3` on the same boot. Review it before loading.
+6. **Optional:** check the iOS root filesystem for MultitouchSupport
+   set-reports, in case the firmware also waits for one.
+
 ## Open questions for the device run
 
 - Whether scanning needs display sync (pin 119 periph mode). If the IRQ count

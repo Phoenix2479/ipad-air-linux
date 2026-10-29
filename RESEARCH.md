@@ -481,3 +481,15 @@ Porting `apple_n1` also needs these J72 pieces:
 
 The A7 GPIO flag decoding for reset (GPIO 15) and the touch IRQ (GPIO 111)
 also remains open.
+
+### iOS post-boot touch path (29 October)
+
+A static read of the 16G77 kernelcache found no GPIO or pinmux write in the
+PWM driver or the `pwmC` path, and no command after discovery: DefaultReports
+has nothing to send for C1,J72, frames are read only on ATN, and display sync
+is set once to peripheral function 1 before the boot NOP. The five N1
+calibration register writes match `apple_n1`. On Linux the J72 N1 boots,
+executes and answers every descriptor request but never raises ATN for
+touches, with or without display sync. The open suspect is whether PWM
+channel 2's 32 kHz output reaches a pad. See `probe/TOUCH.md`, "What iOS does
+after discovery" and "Next session".
