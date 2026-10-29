@@ -111,7 +111,7 @@ GENPD = '/sys/kernel/debug/pm_genpd/pm_genpd_summary'
 # Under a domain line, genpd indents its attached devices and its children.
 TOUCH_SNAP_COMMAND = (
     f"printf 'PWM0_GENPD='; grep -E '^pwm0[[:space:]]' {GENPD} || echo missing; "
-    "printf 'PWM0_LISTED='; awk '/^pwm0[[:space:]]/{p=1;next} !/^ /{p=0} "
+    "printf 'PWM0_LISTED='; busybox awk '/^pwm0[[:space:]]/{p=1;next} !/^ /{p=0} "
     f"p{{n++}} END{{print n+0}}' {GENPD}; "
     f"printf 'SIO_P_GENPD='; grep -E '^sio_p[[:space:]]' {GENPD} || echo missing; "
     f"printf 'GPIO_GENPD='; grep -E '^gpio[[:space:]]' {GENPD} || echo missing; "
