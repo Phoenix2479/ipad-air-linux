@@ -827,8 +827,13 @@ static int __init j72_touch_init(void)
 		ret = poll_atn(&t->tp, "rails_on", 5);
 	if (!ret)
 		ret = drive_pin(&t->tp, PIN_ENABLE_CS, 1);
+#ifdef J72_TOUCH_NO_CLOCK
+	/* Comparison build: the PWM block is powered but channel 2 never runs. */
+	pr_info(KBUILD_MODNAME ": PWM channel 2 left stopped for the clock-off comparison\n");
+#else
 	if (!ret)
 		ret = pwm_start(&t->tp);
+#endif
 	if (!ret)
 		ret = poll_atn(&t->tp, "pwm_on", 15);
 	if (!ret)

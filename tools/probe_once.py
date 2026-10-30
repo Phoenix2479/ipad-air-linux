@@ -260,7 +260,8 @@ TOUCH_FILES = (
 )
 FIRMWARE = {'j72_touch_fw': TOUCH_FILES, 'j72_touch': TOUCH_FILES,
             'j72_touch_d2': TOUCH_FILES, 'j72_touch_d3': TOUCH_FILES,
-            'j72_touch_d4': TOUCH_FILES, 'j72_touch_d5': TOUCH_FILES}
+            'j72_touch_d4': TOUCH_FILES, 'j72_touch_d5': TOUCH_FILES,
+            'j72_touch_d6': TOUCH_FILES}
 
 
 PIN_DUMP_COMMAND = (
@@ -286,6 +287,7 @@ MODULE_CHECKS = {
     'j72_touch_d3': renamed_touch('j72_touch_d3'),
     'j72_touch_d4': renamed_touch('j72_touch_d4'),
     'j72_touch_d5': renamed_touch('j72_touch_d5'),
+    'j72_touch_d6': renamed_touch('j72_touch_d6'),
     'j72_pin_dump': (PIN_DUMP_COMMAND, pin_dump_problems),
 }
 
@@ -295,7 +297,8 @@ EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVID
             'j72_touch_d2': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d2'),
             'j72_touch_d3': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d3'),
             'j72_touch_d4': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d4'),
-            'j72_touch_d5': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d5')}
+            'j72_touch_d5': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d5'),
+            'j72_touch_d6': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d6')}
 
 
 def check(shell, name):

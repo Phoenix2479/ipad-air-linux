@@ -208,6 +208,22 @@ command (notes in `.omx/work/j72-kext-start-20261030/`). iBoot sets the same
 pads for Linux as for iOS ([PIN-DUMP.md](PIN-DUMP.md)), and our PWM writes
 match iOS's.
 
+## Clock-off comparison: the clock does reach the N1 (30 October)
+
+`j72_touch_d6` (`bc4f5bea...`) is the same driver with PWM channel 2 left
+stopped (`J72_TOUCH_NO_CLOCK`); the PWM block is still powered. With the
+clock stopped the N1 never answers: the boot NOP and the HBPP check read all
+zeros, init fails with `HBPP not detected` (-19) and the teardown returns
+`cleanup=0`. With the clock running, the same step answers
+`1f 01 48 79 ...` and the version `0x434d15c1`.
+
+So the 32 kHz clock from PWM channel 2 reaches the N1, and its bootloader
+needs it. With pads, clock, rails, firmware, calibration and the iOS
+start-up settings all matching iOS, the N1 still senses nothing. A fault in
+the touch sensor or its flex cable fits these results as well as any
+remaining software cause, and touch has not been checked in iOS on this
+unit.
+
 ## Next session
 
 On 30 October the iPad ran a fresh `7.0.12-j72baseline` boot with
@@ -219,19 +235,14 @@ battery drains while Linux runs (no charger driver), so check the boot first.
 1. **Check the iPad first.** Over serial, read `uname -r`, uptime and the
    pinmux-pins lines for 15/79/111/119. If it rebooted, boot the diagnostic
    kernel ([README](README.md)) and load `j72_spi_ctrl` before anything else.
-2. **Clock-off comparison.** Load a build that leaves PWM channel 2
-   stopped and compare the boot byte for byte with a normal run: HBPP,
-   version, uploads, calibration reply, execute, discovery reports and the
-   d5 idle poll. If nothing changes, the N1 never sees our 32 kHz clock and
-   its frequency-locked loop has no reference, which would explain an N1
-   that runs but never scans. If something changes, the clock does arrive
-   and the cause is elsewhere (analog supply levels, calibration data).
-3. **Check other A7 sources** for the grape-clk pad: iPad mini 2/3
-   (J85/J86/J87, same A7) device trees, and m1n1's s5l8960x pin tables.
-4. **If a candidate pad is found,** add it to the touch driver as a second
-   runtime mapping (like display sync), drive it only while the rails and
-   clock are up, restore it in teardown, review it, and show the evidence
-   before loading it under a new name.
+2. **Check touch in iOS.** Boot the iPad normally once (the user's
+   decision; it costs no extra DFU when done before the next Linux boot) and
+   tap and swipe for a few seconds. If touch fails there too, stop chasing a
+   software cause.
+3. **If iOS touch works,** compare what is left: LDO voltage settings
+   (`ldo14_vset` reads `0x14`; iOS only enables the rails), the exact moment
+   iOS starts the clock relative to the rails, and the N1 status reports
+   (`d0`, `d1`, `a1`) read during a touch.
 
 ## Open questions for the device run
 

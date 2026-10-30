@@ -12,4 +12,5 @@ obj-m += j72_touch_d2.o
 obj-m += j72_touch_d3.o
 obj-m += j72_touch_d4.o
 obj-m += j72_touch_d5.o
+obj-m += j72_touch_d6.o
 obj-m += j72_pin_dump.o
