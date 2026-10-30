@@ -21,7 +21,7 @@ import test_j72_touch_power as power  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / 'probe/j72_touch.c'
-BUILT = ROOT / 'source/build/j72-touch-d2-20261029/j72_touch_d2.ko'
+BUILT = ROOT / 'source/build/j72-touch-d3-20261030/j72_touch_d3.ko'
 NAME = 'j72_touch'
 ALLOWED_IMPORTS = tuple(sorted(set(c2.ALLOWED_IMPORTS) | {
     'mutex_init_generic', 'timer_init_key', 'input_alloc_absinfo', 'cancel_delayed_work_sync', 'debugfs_create_dir',
@@ -420,6 +420,43 @@ static void frame_reply(const unsigned char *tx, unsigned char *rx, unsigned int
 }
 '''
 
+SETTING_STATE = r'''
+static unsigned char report_bf[4], report_af[1], report_9d[8];
+static unsigned char last_cmd, last_id, last_status;
+'''
+
+SETTING_CASES = r'''    case 0xbf: *length = sizeof(report_bf); return report_bf;
+    case 0xaf: *length = sizeof(report_af); return report_af;
+    case 0x9d: *length = sizeof(report_9d); return report_9d;
+'''
+
+SET_N1 = r'''    if (len == 16 && tx[0] == 0xe4) {
+        unsigned char *target = (unsigned char *)report(tx[1], &length);
+        unsigned int s = sum(tx, 14);
+
+        if ((tx[14] | tx[15] << 8) != (s & 0xffff))
+            violation("set request checksum mismatch");
+        if (!target || tx[2] != length)
+            violation("set request length differs from the report length");
+        last_cmd = tx[0]; last_id = tx[1];
+        last_status = fault("set_refused") ? 2 : 0;
+        if (target && !last_status)
+            memcpy(target, tx + 3, length);
+        printf("EVENT set %02x", tx[1]);
+        for (i = 0; i < tx[2]; i++)
+            printf(" %02x", tx[3 + i]);
+        printf("\n");
+        return;
+    }
+    if (len == 16 && tx[0] == 0xe1) {
+        if (tx[14] != 0xe1 || tx[15])
+            violation("status request checksum mismatch");
+        rx[0] = 0xe1; rx[6] = last_cmd; rx[7] = last_id; rx[8] = last_status;
+        rx[14] = sum(rx, 14); rx[15] = sum(rx, 14) >> 8;
+        return;
+    }
+'''
+
 MAIN_D = r'''
     result = j72_touch_init();
     stats_register();
@@ -487,8 +524,14 @@ def fw_stubs():
             '        frame_reply(tx, rx, len);\n'
             '        return;\n'
             '    }\n')
-    s = s.replace(old, hook + old)
-    execute = '        fw_executed = !fault("execute_dead");\n'
+    s = s.replace(old, hook + SET_N1 + old)
+    case = '    case 0xd9: *length = sizeof(report_d9); return report_d9;\n'
+    if s.count(case) != 1:
+        raise AssertionError('fake N1 report anchor changed')
+    s = s.replace(case, case + SETTING_CASES)
+    s = s.replace('static const unsigned char *report(unsigned char id',
+                  SETTING_STATE + 'static const unsigned char *report(unsigned char id', 1)
+    execute ='        fw_executed = !fault("execute_dead");\n'
     if s.count(execute) != 1:
         raise AssertionError('fake N1 execute anchor changed')
     s = s.replace(execute, execute + '        if (fault("drain_corrupt") || fault("boot_frame"))\n'
@@ -695,6 +738,30 @@ class TouchDriverTests(unittest.TestCase):
         self.assertNotIn('LEAK firmware', '\n'.join(lines))
         self.assertLess(events.index('execute'), events.index('input_register Apple N1 Touchscreen '
                                                              'spi0.0/input0 x=10100 y=10100 slots=32'))
+
+    def test_ios_settings_are_written_after_boot_and_before_input(self):
+        init, events, logs, _ = self.run_fixture()
+        self.assertEqual(init, 0)
+        sets = [event for event in events if event.startswith('set ')]
+        self.assertEqual(sets, ['set bf 9d 81 09 00', 'set af 00',
+                                'set 9d 01 00 00 00 00 00 00 00',
+                                'set bf 9d 81 09 00', 'set af 00'])
+        self.assertLess(events.index('execute'), events.index(sets[0]))
+        self.assertLess(events.index(sets[-1]),
+                        next(i for i, e in enumerate(events) if e.startswith('input_register')))
+        self.assertIn('iOS settings written 5/5', '\n'.join(logs))
+        reads = re.findall(r'settings (\w+): report (\w\w)', '\n'.join(logs))
+        self.assertEqual(reads, [(phase, r) for phase in ('before', 'after')
+                                 for r in ('bf', 'af', '9d')])
+        self.assertNotIn('read failed', '\n'.join(logs))
+
+    def test_refused_settings_are_logged_and_input_still_starts(self):
+        init, events, logs, lines = self.run_fixture(fault='set_refused')
+        self.assertEqual(init, 0)
+        text = '\n'.join(logs)
+        self.assertIn('iOS settings written 0/5', text)
+        self.assertIn('report bf write status=02 last=e4/bf', text)
+        self.safe(lines)
 
     def test_source_never_drives_atn_or_logs_frame_transfers(self):
         self.assertNotIn('gpiod_direction_output_raw(t->tp.gpio[PIN_ATN]', self.source)

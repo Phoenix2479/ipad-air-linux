@@ -140,41 +140,70 @@ virtual addresses, notes in `.omx/work/j72-touch-silent-20261029/`) found:
 - iOS sets ATN to falling edge. This driver uses level-low, which cannot be
   the cause: the raw ATN level never dropped during touches.
 
-Not determined: which pad carries PWM channel 2, whether iBoot sets it, and
-whether iOS userspace (MultitouchSupport) sends set-reports through the user
-client (`0x7e9173c`). The 16G77 root filesystem image on the Mac could answer
-the last one.
+Not determined: which pad carries PWM channel 2 and whether iBoot sets it.
+
+## What iOS userspace sends (30 October)
+
+A static read of the 16G77 root filesystem's MultitouchSupport and of
+`AppleMultitouchSPI.kext/PlugIns/MultitouchHID.plugin` (notes in
+`.omx/work/j72-mt-userspace-20261030/` and
+`.omx/work/j72-touch-setreport-20261030/`) found that userspace does send
+set-reports after the kernel boots the firmware:
+
+- **The plugin's start-up.** `MultitouchHIDClass::start` creates the device
+  and calls `MTDeviceStart`, which sends nothing on SPI. The dispatch source
+  then calls user-client selector 0 with `[1]`.
+  `MTSimpleHIDManager::setDeviceDefaultProperties` sets touch mode 0 and
+  orientation 1.
+- **Touch mode 0** (`MTDeviceSetTouchMode`, `0x19b728f58`) sends report
+  `0xBF` with detectable mask `0x819d` and suppressing mask `0x0009`. It then
+  sends report `0xAF` with `00`. Orientation sends `0x9D`, then touch mode
+  again.
+- **`0xC8`, "enable reporting of all inputs",** is gated on `parser-options`
+  bit `0x20`. J72 has `0x10`, so it is not sent.
+- **The SPI framing** (kernel N1 slot `0x6b0`): a 2 ms sleep, an `E3` length
+  check, a wake, a 16-byte `E4 id len data... sum16`, then an `E1` status
+  read whose byte 8 is the result.
+
+`j72_touch_d3` (`86b370cd...`) sends that sequence after discovery and reads
+the reports before and after. On the device:
+
+| Report | Before | After | Result |
+| --- | --- | --- | --- |
+| `0xBF` | `95 01 00 00` | `9d 81 09 00` | accepted, both writes |
+| `0xAF` | `00` | `00` | accepted, both writes |
+| `0x9D` | status `02` | status `02` | not supported, not written (iOS would skip it too) |
+
+ATN stayed high after the settings, the drain found nothing, and touching
+the screen gave `irqs=0 frames=0`. `stop` returned `cleanup=0` with all four
+pins unclaimed. The firmware's default detection mask (`0x0195`) is already
+non-zero, so the missing set-reports were not what kept the N1 silent. The
+32 kHz clock is the leading suspect again.
 
 ## Next session
 
-The iPad was left on the Stage B boot (`7.0.12-j72baseline`, up about 1.6 h
-at stop) with `j72_spi_ctrl` bound and every touch module stopped: rails off,
-clock stopped, pins 15/79/119 low, 111 at `0x0000038f`, nothing claimed. The
-runner and preflight accept a new build on this boot. The Mac keep-awake runs
-until 31 October 14:09 UTC.
+On 30 October the iPad ran a fresh `7.0.12-j72baseline` boot with
+`j72_spi_ctrl` bound. `j72_touch_d2` and `j72_touch_d3` were both loaded and
+stopped (`cleanup=0`, pins 15/79/119 low, 111 at `0x0000038f`, nothing
+claimed), so the next touch build on that boot needs a new module name. The
+battery drains while Linux runs (no charger driver), so check the boot first.
 
 1. **Check the iPad first.** Over serial, read `uname -r`, uptime and the
    pinmux-pins lines for 15/79/111/119. If it rebooted, boot the diagnostic
    kernel ([README](README.md)) and load `j72_spi_ctrl` before anything else.
-2. **Dump every pin's config word (read-only).** Add a one-shot module that
-   reads the 200 words at `0x20e300000 + 4*pin` through a read-only mapping
-   under the pinctrl device lock, as `read_pins()` does, and logs each raw
-   word with its decoded mode, data, periph, pull and group. Pins with a
-   non-zero periph field that no Linux device owns are the candidates for the
-   PWM channel 2 pad. Known owners so far: 80/81 (i2c0, periph1), and SPI2's
-   clock, MOSI and MISO, which must also be in a periph mode for C1/C2 to
-   have worked.
-3. **Run the dump twice if useful:** once idle, and once while a touch build
-   has PWM channel 2 running, in case iBoot's pad setting depends on it.
-4. **Check other A7 sources** for the grape-clk or touch-clock pad:
-   Project Cascadia's notes, iPad mini 2/3 (J85/J86/J87, same A7) device
-   trees, and m1n1's s5l8960x pin tables.
-5. **If a candidate pad is found,** add it to the touch driver as a second
+2. **Read iBoot's pad setup.** The pin dump ([PIN-DUMP.md](PIN-DUMP.md))
+   showed that starting PWM channel 2 moves no pad, and iOS's kernel writes
+   none. If any code sets the channel 2 pad, it is iBoot. The next time the
+   iPad is in DFU anyway, before booting Linux, decrypt the 16G77 iBEC with
+   `gaster` (the boot script already pwns the device) and look for J72's pin
+   configuration table and any write to the PWM block or to pins 1, 120-126,
+   162, 192 and 193, the periph pins nothing else accounts for.
+3. **Check other A7 sources** for the grape-clk pad: iPad mini 2/3
+   (J85/J86/J87, same A7) device trees, and m1n1's s5l8960x pin tables.
+4. **If a candidate pad is found,** add it to the touch driver as a second
    runtime mapping (like display sync), drive it only while the rails and
-   clock are up, restore it in teardown, and load the result as
-   `j72_touch_d3` on the same boot. Review it before loading.
-6. **Optional:** check the iOS root filesystem for MultitouchSupport
-   set-reports, in case the firmware also waits for one.
+   clock are up, restore it in teardown, review it, and show the evidence
+   before loading it under a new name.
 
 ## Open questions for the device run
 

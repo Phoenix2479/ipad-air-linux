@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Resident J72 touch driver, Stage D: the Stage C2 firmware boot, then the
- * apple_n1 runtime. A threaded interrupt on ATN reads frames, parses classic
- * contact reports and feeds a multitouch input device. It is level-low, not
+ * Resident J72 touch driver, Stage D: the Stage C2 firmware boot, the iOS
+ * MultitouchHID start-up set-reports, then the apple_n1 runtime. A threaded
+ * interrupt on ATN reads frames, parses classic contact reports and feeds a
+ * multitouch input device. It is level-low, not
  * apple_n1's falling edge, so an edge that arrives while the line is masked
  * cannot leave ATN low with no interrupt pending.
  *
@@ -441,6 +442,108 @@ out:
 	return IRQ_HANDLED;
 }
 
+/*
+ * iOS 16G77 MultitouchHID start-up for touch mode 0, orientation 1:
+ * setTouchMode (BF detectable 0x819d, suppressing 0x0009; AF 0), then
+ * setOrientation (9D) and setTouchMode again.
+ */
+struct n1_setting {
+	u8 report;
+	u8 length;
+	u8 data[8];
+};
+
+static const struct n1_setting n1_settings[] = {
+	{ 0xbf, 4, { 0x9d, 0x81, 0x09, 0x00 } },
+	{ 0xaf, 1, { 0x00 } },
+	{ 0x9d, 8, { 0x01 } },
+	{ 0xbf, 4, { 0x9d, 0x81, 0x09, 0x00 } },
+	{ 0xaf, 1, { 0x00 } },
+};
+
+static const u8 n1_setting_reports[] = { 0xbf, 0xaf, 0x9d };
+
+/* N1 slot 0x6b0, short form: E3 length check, wake, E4 write, E1 status. */
+static int n1_set_report(struct touch *t, const struct n1_setting *s)
+{
+	u16 length;
+	int ret;
+
+	if (s->length > sizeof(s->data))
+		return -EMSGSIZE;
+	usleep_range(2000, 3000);
+	ret = n1_command16(&t->f, &t->id, 0xe3, s->report);
+	if (ret)
+		return ret;
+	length = get_unaligned_le16(t->id.rx + 3);
+	if (t->id.rx[2] || length != s->length) {
+		pr_err(KBUILD_MODNAME ": report %02x not written: status=%02x length=%u want=%u\n",
+		       s->report, t->id.rx[2], length, s->length);
+		return -EPROTO;
+	}
+	ret = n1_wake(&t->f, &t->id);
+	if (ret)
+		return ret;
+	memset(t->id.tx, 0, 16);
+	t->id.tx[0] = 0xe4;
+	t->id.tx[1] = s->report;
+	t->id.tx[2] = s->length;
+	memcpy(t->id.tx + 3, s->data, s->length);
+	put_unaligned_le16(n1_sum(t->id.tx, 14), t->id.tx + 14);
+	ret = n1_xfer(&t->id, "set_request", 16);
+	if (ret)
+		return ret;
+	memset(t->id.tx, 0, 16);
+	t->id.tx[0] = 0xe1;
+	t->id.tx[14] = 0xe1;
+	ret = n1_xfer(&t->id, "set_status", 16);
+	if (!ret)
+		ret = n1_check_control(&t->id, 0xe1, s->report, 16);
+	if (ret)
+		return ret;
+	/* iOS fails on the status byte and only counts a wrong echo. */
+	if (t->id.rx[8] || t->id.rx[6] != 0xe4 || t->id.rx[7] != s->report)
+		pr_err(KBUILD_MODNAME ": report %02x write status=%02x last=%02x/%02x\n",
+		       s->report, t->id.rx[8], t->id.rx[6], t->id.rx[7]);
+	return t->id.rx[8] ? -EPROTO : 0;
+}
+
+static void read_settings(struct touch *t, const char *phase)
+{
+	u8 data[N1_REPORT_MAX];
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(n1_setting_reports); i++) {
+		pr_info(KBUILD_MODNAME ": settings %s: report %02x\n", phase,
+			n1_setting_reports[i]);
+		ret = n1_get_report(&t->f, &t->id, n1_setting_reports[i], data, 1);
+		if (ret)
+			pr_err(KBUILD_MODNAME ": settings %s: report %02x read failed: %d\n",
+			       phase, n1_setting_reports[i], ret);
+	}
+}
+
+/* Logged, not enforced: a refused setting leaves the d2 behaviour. */
+static void apply_settings(struct touch *t)
+{
+	int i, ret, written = 0;
+
+	read_settings(t, "before");
+	for (i = 0; i < ARRAY_SIZE(n1_settings); i++) {
+		ret = n1_set_report(t, &n1_settings[i]);
+		if (ret)
+			pr_err(KBUILD_MODNAME ": set report %02x failed: %d\n",
+			       n1_settings[i].report, ret);
+		else
+			written++;
+	}
+	read_settings(t, "after");
+	pr_info(KBUILD_MODNAME ": iOS settings written %d/%zu\n", written,
+		ARRAY_SIZE(n1_settings));
+	/* A low ATN here means the settings woke reporting before the IRQ. */
+	sample_atn(&t->tp, "settings");
+}
+
 static int start_input(struct touch *t)
 {
 	struct input_dev *input;
@@ -660,6 +763,7 @@ static int __init j72_touch_init(void)
 		t->f.fw = NULL;
 		t->f.cal = NULL;
 		t->f.prox = NULL;
+		apply_settings(t);
 		ret = start_input(t);
 	}
 	if (!ret) {
