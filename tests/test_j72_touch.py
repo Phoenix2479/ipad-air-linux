@@ -21,7 +21,7 @@ import test_j72_touch_power as power  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / 'probe/j72_touch.c'
-BUILT = ROOT / 'source/build/j72-touch-d3-20261030/j72_touch_d3.ko'
+BUILT = ROOT / 'source/build/j72-touch-d5-20261030/j72_touch_d5.ko'
 NAME = 'j72_touch'
 ALLOWED_IMPORTS = tuple(sorted(set(c2.ALLOWED_IMPORTS) | {
     'mutex_init_generic', 'timer_init_key', 'input_alloc_absinfo', 'cancel_delayed_work_sync', 'debugfs_create_dir',
@@ -30,7 +30,8 @@ ALLOWED_IMPORTS = tuple(sorted(set(c2.ALLOWED_IMPORTS) | {
     'input_allocate_device', 'input_event', 'input_free_device',
     'input_mt_get_slot_by_key', 'input_mt_init_slots', 'input_mt_report_slot_state',
     'input_mt_sync_frame', 'input_register_device', 'input_set_abs_params',
-    'input_set_capability', 'input_unregister_device', 'queue_delayed_work_on',
+    'input_set_capability', 'input_unregister_device', 'kstrtouint_from_user',
+    'queue_delayed_work_on',
     'request_threaded_irq', 'seq_lseek', 'seq_printf', 'seq_read', 'simple_open',
     'single_open', 'single_release', 'system_percpu_wq', '___ratelimit',
     'mutex_lock', 'mutex_unlock', 'pinctrl_get', 'pinctrl_lookup_state', 'pinctrl_put',
@@ -326,8 +327,16 @@ static int (*stats_show_fn)(struct seq_file *, void *);
 #define DEFINE_SHOW_ATTRIBUTE(name) \
     static const struct file_operations name##_fops = { .owner = NULL }; \
     static int name##_register(void) { stats_show_fn = name##_show; return 0; }
-static const struct file_operations *stop_ops;
+static const struct file_operations *stop_ops, *poll_ops;
 static void *debugfs_private;
+static int kstrtouint_from_user(const char *s, size_t count, unsigned int base,
+                                unsigned int *res)
+{
+    char *end;
+
+    *res = strtoul(s, &end, base);
+    return end == s ? -EINVAL : 0;
+}
 static struct dentry *debugfs_create_dir(const char *name, struct dentry *parent)
 {
     printf("EVENT debugfs_dir %s\n", name);
@@ -340,6 +349,8 @@ static struct dentry *debugfs_create_file(const char *name, unsigned int mode,
     printf("EVENT debugfs_file %s %o\n", name, mode);
     if (!strcmp(name, "stop"))
         stop_ops = fops;
+    if (!strcmp(name, "poll"))
+        poll_ops = fops;
     debugfs_private = data;
     return &debugfs_dir;
 }
@@ -490,6 +501,12 @@ SCENARIOS = {
               '        queue_contact(5, 4, 1100, 2100); irq_thread(77, irq_data);\n'
               '        queue_contact(5, 1, 1100, 2100); irq_thread(77, irq_data);'),
     'clamp': 'queue_contact(1, 3, -5000, 30000); irq_thread(77, irq_data);',
+    'poll': ('queue_contact(6, 3, 1200, 2300);\n'
+             '        { struct inode pi = { debugfs_private }; struct file pf;\n'
+             '          poll_ops->open(&pi, &pf);\n'
+             '          printf("POLL %ld\\n", poll_ops->write(&pf, "4", 1, NULL));\n'
+             '          printf("POLL_ZERO %ld\\n", poll_ops->write(&pf, "0", 1, NULL)); }\n'
+             '        queue_contact(6, 4, 1300, 2400); irq_thread(77, irq_data);'),
     'recovery': ('frame_reply_corrupt_hold = 3; queue_contact(2, 3, 500, 600);\n'
                  '        irq_thread(77, irq_data);\n'
                  '        if (pending_work && pending_work->queued) '
@@ -762,6 +779,22 @@ class TouchDriverTests(unittest.TestCase):
         self.assertIn('iOS settings written 0/5', text)
         self.assertIn('report bf write status=02 last=e4/bf', text)
         self.safe(lines)
+
+    def test_poll_reads_frames_without_atn_and_rejects_bad_counts(self):
+        init, events, logs, lines = self.run_fixture('poll')
+        self.assertEqual(init, 0)
+        text = '\n'.join(logs)
+        self.assertIn('debugfs_file poll 200', events)
+        self.assertIn('POLL 1', lines)
+        self.assertIn(f'POLL_ZERO {-errno.EINVAL}', lines)
+        self.assertIn('poll 0 frame type=0x44', text)
+        self.assertIn('poll done: 4 reads', text)
+        self.assertNotIn('check failed', text)
+        polled = events.index(next(e for e in events if e.startswith('input_register')))
+        self.assertFalse([e for e in events[polled:] if e.startswith('input_event')
+                          and 'ABS_MT_POSITION_X 1200' in e])
+        self.assertIn('frame 1 contact id=6 state=4 x=1300 y=2400', text)
+        self.safe(lines, irq_ran=True)
 
     def test_source_never_drives_atn_or_logs_frame_transfers(self):
         self.assertNotIn('gpiod_direction_output_raw(t->tp.gpio[PIN_ATN]', self.source)

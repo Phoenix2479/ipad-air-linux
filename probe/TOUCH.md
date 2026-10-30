@@ -180,10 +180,38 @@ pins unclaimed. The firmware's default detection mask (`0x0195`) is already
 non-zero, so the missing set-reports were not what kept the N1 silent. The
 32 kHz clock is the leading suspect again.
 
+## Frame poll: the N1 is not sensing (30 October)
+
+`j72_touch_d4` (`f5d2437c...`) and `j72_touch_d5` (`2eff9870...`) add a
+debugfs `poll` file. Writing N reads the frame-request header every 20 ms
+whatever ATN says, logs header changes, and reads any frame longer than
+J72's 14-byte stale status. d5 also sends the `0xEE` wake, rate-limited to
+one per 100 ms, before each read.
+
+- **Without wakes (d4):** after two leftover replies, every header read as all
+  zeros: 1000 reads over about 25 s while the screen was being touched,
+  0 frames, ATN high.
+- **With wakes (d5), idle:** each wake is followed by one `e1 00 00` header
+  (awake, nothing pending), then zeros again within 20 ms. The N1 drops into
+  idle almost at once and answers only after a host wake.
+- **With wakes (d5), touched for about 25 s:** 1000 reads, 414 header
+  changes, every one either the idle `e1 00 00 ...` reply or zeros, and
+  0 frames.
+
+So the firmware runs and the SPI link works, but the N1 produces no touch
+data at all. The fault is in sensing, not in the ATN line or the host's
+frame reads. iOS's kernel sends no command we lack: user-client selector 0
+only enables frame delivery to that client, selector 4 power state 2
+repeats the boot-time power functions (J72 has only `power_ana` = pmuL 525
+and `power_ldo` = pmuL 529, both on), and there is no hidden scan-enable
+command (notes in `.omx/work/j72-kext-start-20261030/`). iBoot sets the same
+pads for Linux as for iOS ([PIN-DUMP.md](PIN-DUMP.md)), and our PWM writes
+match iOS's.
+
 ## Next session
 
 On 30 October the iPad ran a fresh `7.0.12-j72baseline` boot with
-`j72_spi_ctrl` bound. `j72_touch_d2` and `j72_touch_d3` were both loaded and
+`j72_spi_ctrl` bound. `j72_touch_d2` through `j72_touch_d5` were all loaded and
 stopped (`cleanup=0`, pins 15/79/119 low, 111 at `0x0000038f`, nothing
 claimed), so the next touch build on that boot needs a new module name. The
 battery drains while Linux runs (no charger driver), so check the boot first.
@@ -191,13 +219,13 @@ battery drains while Linux runs (no charger driver), so check the boot first.
 1. **Check the iPad first.** Over serial, read `uname -r`, uptime and the
    pinmux-pins lines for 15/79/111/119. If it rebooted, boot the diagnostic
    kernel ([README](README.md)) and load `j72_spi_ctrl` before anything else.
-2. **Read iBoot's pad setup.** The pin dump ([PIN-DUMP.md](PIN-DUMP.md))
-   showed that starting PWM channel 2 moves no pad, and iOS's kernel writes
-   none. If any code sets the channel 2 pad, it is iBoot. The next time the
-   iPad is in DFU anyway, before booting Linux, decrypt the 16G77 iBEC with
-   `gaster` (the boot script already pwns the device) and look for J72's pin
-   configuration table and any write to the PWM block or to pins 1, 120-126,
-   162, 192 and 193, the periph pins nothing else accounts for.
+2. **Clock-off comparison.** Load a build that leaves PWM channel 2
+   stopped and compare the boot byte for byte with a normal run: HBPP,
+   version, uploads, calibration reply, execute, discovery reports and the
+   d5 idle poll. If nothing changes, the N1 never sees our 32 kHz clock and
+   its frequency-locked loop has no reference, which would explain an N1
+   that runs but never scans. If something changes, the clock does arrive
+   and the cause is elsewhere (analog supply levels, calibration data).
 3. **Check other A7 sources** for the grape-clk pad: iPad mini 2/3
    (J85/J86/J87, same A7) device trees, and m1n1's s5l8960x pin tables.
 4. **If a candidate pad is found,** add it to the touch driver as a second

@@ -700,6 +700,86 @@ static const struct file_operations stop_fops = {
 	.write = stop_write,
 };
 
+/*
+ * Debug: wake the N1 (at most every 100 ms) and read the frame request
+ * header every 20 ms whatever ATN says, to tell an N1 that does not scan
+ * from one that scans but never raises ATN.
+ * Only header changes are logged. A length above the 14-byte stale status
+ * seen on J72 is read in full and its report type logged.
+ */
+static int poll_frames(struct touch *t, unsigned int count)
+{
+	unsigned int i, changes = 0, reads = 0;
+	u8 last[16] = {};
+	int ret = 0, atn, read;
+	u16 length;
+
+	for (i = 0; i < count && !ret; i++) {
+		mutex_lock(&t->lock);
+		if (!t->running) {
+			mutex_unlock(&t->lock);
+			ret = -ENODEV;
+			break;
+		}
+		/* Rate-limited to one per 100 ms: keeps an idle N1 answering. */
+		ret = n1_wake(&t->f, &t->id);
+		if (ret) {
+			mutex_unlock(&t->lock);
+			break;
+		}
+		memset(t->id.tx, 0, 16);
+		t->id.tx[0] = 0xeb;
+		t->id.tx[1] = t->sequence;
+		put_unaligned_le16(n1_sum(t->id.tx, 14), t->id.tx + 14);
+		ret = n1_xfer(&t->id, NULL, 16);
+		atn = atn_asserted(t);
+		if (!ret && memcmp(last, t->id.rx, 16)) {
+			memcpy(last, t->id.rx, 16);
+			if (changes++ < 64)
+				pr_info(KBUILD_MODNAME ": poll %u atn=%d header=%*ph\n",
+					i, atn, 16, last);
+		}
+		length = get_unaligned_le16(t->id.rx + 1);
+		if (!ret && (t->id.rx[0] & 0xf0) == 0xe0 &&
+		    get_unaligned_le16(t->id.rx + 14) == (u16)n1_sum(t->id.rx, 14) &&
+		    length > 14 && reads < 16) {
+			reads++;
+			read = read_frame(t, false);
+			if (read > 0)
+				pr_info(KBUILD_MODNAME ": poll %u frame type=0x%02x data=%*ph\n",
+					i, t->id.rx[5], 16, t->id.rx + 5);
+			else
+				pr_info(KBUILD_MODNAME ": poll %u read %d\n", i, read);
+		}
+		mutex_unlock(&t->lock);
+		msleep(20);
+	}
+	pr_info(KBUILD_MODNAME ": poll done: %u reads, %u header changes, %u frames read, ret=%d\n",
+		i, changes, reads, ret);
+	return ret;
+}
+
+static ssize_t poll_write(struct file *file, const char __user *buf,
+			  size_t count, loff_t *ppos)
+{
+	unsigned int polls;
+	int ret;
+
+	ret = kstrtouint_from_user(buf, count, 0, &polls);
+	if (ret)
+		return ret;
+	if (!polls || polls > 1000)
+		return -EINVAL;
+	ret = poll_frames(file->private_data, polls);
+	return ret ? ret : count;
+}
+
+static const struct file_operations poll_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.write = poll_write,
+};
+
 static int stats_show(struct seq_file *s, void *unused)
 {
 	struct touch *t = s->private;
@@ -775,6 +855,7 @@ static int __init j72_touch_init(void)
 	}
 	if (!ret) {
 		debugfs_create_file("stats", 0400, t->debugfs, t, &stats_fops);
+		debugfs_create_file("poll", 0200, t->debugfs, t, &poll_fops);
 		pr_info(KBUILD_MODNAME ": stage D running; write /sys/kernel/debug/%s/stop to power off\n",
 			KBUILD_MODNAME);
 		return 0;

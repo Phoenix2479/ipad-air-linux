@@ -64,6 +64,29 @@ Linux inherits is most likely the one iOS runs with, and the "clock never
 reaches a pad" hypothesis is weaker than it was. No pin is switched on this
 evidence. The unaccounted pins stay leads only.
 
+## iBoot's pin tables
+
+The 16G77 iBEC and iBoot (`iBoot-4513.270.14`) were decrypted with the
+published keys from The Apple Wiki (via `ipsw download keys`). The two images
+are byte-identical, so the loader that runs before m1n1 and Linux is the one
+that runs before iOS. The decrypted files stay in `.omx/work/` and are not
+committed.
+
+Our live pin words appear in order in the image as two 200-entry tables of
+4-byte config words, at file offsets `0x4b6b8` and `0x4bcf8`. The second
+table matches the live state on 139 pins. Compared with the live idle dump:
+
+- **No peripheral-function difference.** Neither table sets a pin to a
+  peripheral function that is not in one on our boot.
+- **The other differences are benign.** Table entries of `0x0007000e`
+  (mode 7) read as 0 live: pins 24-31, 45-63, 127, 151-159 and 173-191. The
+  button pins (2-5, 110) carry Linux's interrupt setup. A few baseband and
+  wake pins (8-21, 40-43, 166-168) differ in mode or pull.
+
+So iBoot gives Linux the same pads it gives iOS, and iOS's kernel adds none
+on the PWM path. Whatever carries the PWM channel 2 output is set up the same
+way on both. A missing pad mux is no longer a credible cause.
+
 ## Build and test
 
 ```sh

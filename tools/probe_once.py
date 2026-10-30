@@ -259,7 +259,8 @@ TOUCH_FILES = (
     (FIRMWARE_DIR / 'apple/j72-n1-cal.bin', '/lib/firmware/apple/j72-n1-cal.bin'),
 )
 FIRMWARE = {'j72_touch_fw': TOUCH_FILES, 'j72_touch': TOUCH_FILES,
-            'j72_touch_d2': TOUCH_FILES, 'j72_touch_d3': TOUCH_FILES}
+            'j72_touch_d2': TOUCH_FILES, 'j72_touch_d3': TOUCH_FILES,
+            'j72_touch_d4': TOUCH_FILES, 'j72_touch_d5': TOUCH_FILES}
 
 
 PIN_DUMP_COMMAND = (
@@ -283,6 +284,8 @@ MODULE_CHECKS = {
     'j72_touch': (TOUCH_COMMAND, touch_problems),
     'j72_touch_d2': renamed_touch('j72_touch_d2'),
     'j72_touch_d3': renamed_touch('j72_touch_d3'),
+    'j72_touch_d4': renamed_touch('j72_touch_d4'),
+    'j72_touch_d5': renamed_touch('j72_touch_d5'),
     'j72_pin_dump': (PIN_DUMP_COMMAND, pin_dump_problems),
 }
 
@@ -290,7 +293,9 @@ EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVID
             'j72_touch_power': TOUCH_POWER_EVIDENCE, 'j72_touch_id': TOUCH_ID_EVIDENCE,
             'j72_touch_fw': TOUCH_FW_EVIDENCE, 'j72_touch': TOUCH_EVIDENCE,
             'j72_touch_d2': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d2'),
-            'j72_touch_d3': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d3')}
+            'j72_touch_d3': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d3'),
+            'j72_touch_d4': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d4'),
+            'j72_touch_d5': TOUCH_EVIDENCE.replace('j72_touch', 'j72_touch_d5')}
 
 
 def check(shell, name):
