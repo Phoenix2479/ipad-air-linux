@@ -262,6 +262,17 @@ FIRMWARE = {'j72_touch_fw': TOUCH_FILES, 'j72_touch': TOUCH_FILES,
             'j72_touch_d2': TOUCH_FILES}
 
 
+PIN_DUMP_COMMAND = (
+    "printf 'PINCTRL_DRIVER='; l=$(busybox readlink "
+    "/sys/bus/platform/devices/20e300000.pinctrl/driver 2>/dev/null); echo \"${l##*/}\"")
+
+
+def pin_dump_problems(out, fields):
+    if not fields.get('PINCTRL_DRIVER', '').strip():
+        return ['20e300000.pinctrl has no driver']
+    return []
+
+
 MODULE_CHECKS = {
     'j72_pmu_read': (PMU_COMMAND, pmu_problems),
     'j72_spi_ctrl': (SPI_CTRL_COMMAND, spi_ctrl_problems),
@@ -271,6 +282,7 @@ MODULE_CHECKS = {
     'j72_touch_fw': (TOUCH_FW_COMMAND, touch_fw_problems),
     'j72_touch': (TOUCH_COMMAND, touch_problems),
     'j72_touch_d2': renamed_touch('j72_touch_d2'),
+    'j72_pin_dump': (PIN_DUMP_COMMAND, pin_dump_problems),
 }
 
 EVIDENCE = {'j72_spi_ctrl': SPI_CTRL_EVIDENCE, 'j72_touch_snap': TOUCH_SNAP_EVIDENCE,

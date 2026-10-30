@@ -9,3 +9,4 @@ obj-m += j72_touch_id.o
 obj-m += j72_touch_fw.o
 obj-m += j72_touch.o
 obj-m += j72_touch_d2.o
+obj-m += j72_pin_dump.o

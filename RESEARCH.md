@@ -493,3 +493,19 @@ executes and answers every descriptor request but never raises ATN for
 touches, with or without display sync. The open suspect is whether PWM
 channel 2's 32 kHz output reaches a pad. See `probe/TOUCH.md`, "What iOS does
 after discovery" and "Next session".
+
+### OrchardLinux advances by 30 October
+
+OrchardLinux/hardware `ae1457e` and omarchy-a `a95abba` add iPad 5 (J71t)
+support from Berkay Kösebay's port, iPhone 6 (N61, A8) touch, iPad Air 2
+(J81/J82, A8X), NFS root boot over USB, recovery and installer v2, and a USB
+port reset after checkm8 in the CLI.
+
+The iPhone 6 is the closest touch reference with working evdev contacts, but
+like the iPad 5 it takes its 32 kHz touch clock from a PMGR register
+(`apple,t7000-touch-clock` at PMGR `0x1e000`), not a PWM. Its touch analog
+supply comes from the display PMU (`chestnut`). No upstream tree describes
+the A7 PWM block or a pad for it, so the J72 `grape-clk` path is still
+unmapped. In the J72 ADT the only pin-routed clocks are the camera's
+`function-sensor_extclk` (GPIO 89 and 93, flags `0x02000101`, the same
+peripheral-function form as display sync); the touch clock has no such entry.

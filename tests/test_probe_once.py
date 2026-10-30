@@ -293,6 +293,13 @@ class ProbeOnceCheckTests(unittest.TestCase):
         self.assertEqual(problems, ['platform device j72_touch_d2 already exists'])
         self.assertIn('/sys/kernel/debug/j72_touch_d2/stats', probe_once.EVIDENCE['j72_touch_d2'])
 
+    def test_pin_dump_needs_only_a_bound_pin_controller(self):
+        problems, commands = check('j72_pin_dump', GENERIC + 'PINCTRL_DRIVER=apple-gpio-pinctrl\n')
+        self.assertEqual(problems, [])
+        self.assertIn('20e300000.pinctrl/driver', commands[0])
+        problems, _ = check('j72_pin_dump', GENERIC + 'PINCTRL_DRIVER=\n')
+        self.assertEqual(problems, ['20e300000.pinctrl has no driver'])
+
     def test_touch_fw_uploads_both_files_privately_to_lib_firmware(self):
         files = probe_once.FIRMWARE['j72_touch_fw']
         self.assertEqual([remote for _, remote in files],
